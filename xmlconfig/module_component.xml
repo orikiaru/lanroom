@@ -1,0 +1,10 @@
+<Components>
+    <component name="RoomServer" type="Server">
+        <rpc name="Join"/>
+        <rpc name="Heartbeat"/>
+    </component>
+    <component name="RoomClient" type="Client">
+        <rpc name="Join"/>
+        <rpc name="Heartbeat"/>
+    </component>
+</Components>

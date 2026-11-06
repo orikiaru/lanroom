@@ -1,0 +1,8 @@
+<Modules>
+    <module name="LanServer">
+        <component name="RoomServer"/>
+    </module>
+    <module name="LanClient">
+        <component name="RoomClient"/>
+    </module>
+</Modules>

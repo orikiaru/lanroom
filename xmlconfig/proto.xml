@@ -1,0 +1,35 @@
+// 字段号写在每行前面。请求和回复各用自己的 rpcdata，共用一个协议号。
+
+rpcdata RoomPeer {
+    0 string sMac;
+    1 uint32_t iSourceIp;
+    2 uint16_t iSourcePort;
+    3 uint32_t iVirtualIp;
+    4 uint8_t iDirect;
+}
+
+rpcdata JoinReq {
+    0 string sRoom;
+    1 string sMac;
+}
+
+rpcdata JoinRes {
+    0 int32_t iCode;
+    1 uint32_t iVirtualIp;
+    2 vector<RoomPeer> vPeers;
+}
+
+rpcdata HeartbeatReq {
+    0 string sRoom;
+    1 string sMac;
+    2 uint8_t iSawPunch;
+}
+
+rpcdata HeartbeatRes {
+    0 int32_t iCode;
+    1 uint32_t iVirtualIp;
+    2 vector<RoomPeer> vPeers;
+}
+
+rpc Join { id 4101; request JoinReq; response JoinRes; timeout 25; }
+rpc Heartbeat { id 4102; request HeartbeatReq; response HeartbeatRes; timeout 25; }

@@ -1,0 +1,12 @@
+[RoomClient]
+ip = "127.0.0.1"
+port = "17001"
+type = "tcp"
+
+[ThreadPool]
+threadcount = 2
+
+[Timer]
+offset_ms = 50
+timer_lv_count = 4
+timer_lvs = [128, 128, 128, 1]

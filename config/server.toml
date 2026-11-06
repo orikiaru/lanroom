@@ -1,0 +1,24 @@
+[ThreadPool]
+threadcount = 2
+
+[Timer]
+offset_ms = 50
+timer_lv_count = 4
+timer_lvs = [128, 128, 128, 1]
+
+[RedisClient]
+ip = "127.0.0.1"
+port = "6379"
+type = "tcp"
+timeout_ms = 25000
+max_pending = 128
+
+[RoomServer]
+ip = "127.0.0.1"
+port = "17001"
+type = "tcp"
+
+[LanServer]
+ip = "127.0.0.1"
+port = "17000"
+member_ttl_ms = 1000
