@@ -1,4 +1,5 @@
 #include "roomserver.h"
+#include "roomudp.h"
 #include "oi_app.h"
 #include "oi_base.h"
 #include "oi_config.h"
@@ -31,16 +32,14 @@ int main(int iArgumentCount, char* vArguments[])
 		fprintf(stderr, "room rpc listen failed\n");
 		return 1;
 	}
-	std::string sIp = "0.0.0.0";
-	std::string sPort = "17000";
-	::OI::Base::Config::GlobalConfig().GetAs("LanServer.ip", sIp);
-	::OI::Base::Config::GlobalConfig().GetAs("LanServer.port", sPort);
-	if (!RoomServer::GetInstance().OpenUdp(sIp, (uint16_t)atoi(sPort.c_str())))
+	if (!RoomUdp::GetInstance().Init() || !RoomUdp::GetInstance().StartServer())
 	{
 		fprintf(stderr, "udp bind failed\n");
 		return 1;
 	}
-	printf("lanroom server listen %s:%u\n", sIp.c_str(), RoomServer::GetInstance().UdpPort());
+	std::string sIp;
+	::OI::Base::Config::GlobalConfig().GetAs("RoomUdp.ip", sIp);
+	printf("lanroom server listen %s:%u\n", sIp.c_str(), RoomUdp::GetInstance().LocalPort());
 	fflush(stdout);
 	return ::OI::Base::RunFramework();
 }

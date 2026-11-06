@@ -1,24 +1,23 @@
 #pragma once
 #include "oi_net.h"
 #include "oi_rpc_coro.h"
-#include <string>
+#include "oi_rpcdata_heartbeatreq.h"
+#include "oi_rpcdata_heartbeatres.h"
+#include "oi_rpcdata_joinreq.h"
+#include "oi_rpcdata_joinres.h"
+#include "oi_singleton.h"
 
 class RoomServer : public OI::Rpc::ProtoSessionManager
 {
-	static RoomServer inst;
+	DECLARE_SINGLETON(RoomServer)
+	RoomServer();
+
+	::OI::Rpc::RpcTask HandleJoin(const ::OI::Rpc::RpcContext& stContext, const ::OI::RpcData::JoinReq& stRequest, ::OI::RpcData::JoinRes& stResponse);
+	::OI::Rpc::RpcTask HandleHeartbeat(const ::OI::Rpc::RpcContext& stContext, const ::OI::RpcData::HeartbeatReq& stRequest, ::OI::RpcData::HeartbeatRes& stResponse);
 
   public:
-	RoomServer()
-	{
-	}
 	virtual ~RoomServer();
 	bool Init();
-	bool OpenUdp(const std::string& sIp, uint16_t iPort);
-	uint16_t UdpPort() const;
-	static RoomServer& GetInstance()
-	{
-		return inst;
-	}
 	virtual const std::string GetIDString();
 
   private:

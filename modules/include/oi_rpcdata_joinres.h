@@ -9,23 +9,20 @@ namespace OI { namespace RpcData {
 class JoinRes : public ::OI::Rpc::RpcData
 {
 public:
-    int32_t iCode{};
     uint32_t iVirtualIp{};
     std::vector<RoomPeer> vPeers{};
     
     explicit JoinRes (){}
-    JoinRes ( const int32_t & l_iCode, const uint32_t & l_iVirtualIp, const std::vector<RoomPeer> & l_vPeers )
+    JoinRes ( const uint32_t & l_iVirtualIp, const std::vector<RoomPeer> & l_vPeers )
     {
-        iCode = l_iCode;
         iVirtualIp = l_iVirtualIp;
         vPeers = l_vPeers;
         
     }
     virtual ::OI::Base::BytesStream& serialize(::OI::Base::BytesStream& os) const
     {
-        os.WritePb(0, iCode);
-        os.WritePb(1, iVirtualIp);
-        os.WritePb(2, vPeers);
+        os.WritePb(0, iVirtualIp);
+        os.WritePb(1, vPeers);
         return os;
     }
     virtual ::OI::Base::BytesStream& deserialize(::OI::Base::BytesStream& os)
@@ -38,9 +35,8 @@ public:
             os.ReadPbHeader(field_seq, field_size);
             switch (field_seq)
             {
-            case 0: os.ReadPb(field_size, iCode); break;
-            case 1: os.ReadPb(field_size, iVirtualIp); break;
-            case 2: os.ReadPb(field_size, vPeers); break;
+            case 0: os.ReadPb(field_size, iVirtualIp); break;
+            case 1: os.ReadPb(field_size, vPeers); break;
             default: os.SkipPb(field_size); break;
             }
         }
@@ -50,7 +46,6 @@ public:
     {
         if (!in.isObject()) return false;
         JoinRes decoded(*this);
-        if (in.isMember("iCode") && !::OI::Rpc::FromJsonValue(in["iCode"], decoded.iCode)) return false;
         if (in.isMember("iVirtualIp") && !::OI::Rpc::FromJsonValue(in["iVirtualIp"], decoded.iVirtualIp)) return false;
         if (in.isMember("vPeers") && !::OI::Rpc::FromJsonValue(in["vPeers"], decoded.vPeers)) return false;
         *this = std::move(decoded);
@@ -69,7 +64,6 @@ public:
     void ToJson(Json::Value& out) const
     {
         out = Json::Value(Json::objectValue);
-        ::OI::Rpc::ToJsonValue(out["iCode"], iCode);
         ::OI::Rpc::ToJsonValue(out["iVirtualIp"], iVirtualIp);
         ::OI::Rpc::ToJsonValue(out["vPeers"], vPeers);
     }

@@ -9,6 +9,13 @@ ip = "127.0.0.1"
 port = "17001"
 type = "tcp"
 
+# ip 由 --bind 覆盖，端口交给系统选。
+[RoomUdp]
+ip = "0.0.0.0"
+port = "0"
+type = "udp"
+idle_timeout_ms = 60000
+
 
 [LogClient]
 ip		= "127.0.0.1"

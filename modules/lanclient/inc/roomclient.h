@@ -1,25 +1,17 @@
 #pragma once
 #include "oi_net.h"
 #include "oi_rpc_coro.h"
-#include <string>
+#include "oi_singleton.h"
 
+// 连服务器的 TCP 口。加入和心跳由 RoomMgr 从这里发。
 class RoomClient : public OI::Rpc::ProtoClientManager
 {
-	static RoomClient inst;
+	DECLARE_SINGLETON(RoomClient)
+	RoomClient();
 
   public:
-	RoomClient()
-	{
-	}
 	virtual ~RoomClient();
 	bool Init();
-	bool Prepare(const std::string& sRoom, const std::string& sMac, const std::string& sBind, const std::string& sUdpServer, uint16_t iUdpPort, uint16_t iNicPort, bool bDrop);
-	void StartWork();
-	void JoinWork();
-	static RoomClient& GetInstance()
-	{
-		return inst;
-	}
 	virtual const std::string GetIDString();
 
   private:

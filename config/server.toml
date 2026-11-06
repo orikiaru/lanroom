@@ -1,5 +1,5 @@
 [ThreadPool]
-threadcount = 2
+threadcount = 1
 
 [Timer]
 offset_ms = 50
@@ -18,7 +18,11 @@ ip = "127.0.0.1"
 port = "17001"
 type = "tcp"
 
-[LanServer]
+[RoomUdp]
 ip = "127.0.0.1"
 port = "17000"
-member_ttl_ms = 1000
+type = "udp"
+idle_timeout_ms = 60000
+
+[LanServer]
+member_ttl = 1

@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 import socket
+import struct
 import subprocess
 import sys
 import threading
@@ -16,7 +17,15 @@ CLIENT = BUILD / ("lanroom-client.exe" if sys.platform == "win32" else "lanroom-
 REDIS = ("127.0.0.1", 6379)
 REDIS_PROC = None
 SERVER_PORT = 17000
+PROBE_ID = 4106
 FAILS = []
+
+
+def probe_frame(room, mac, saw=0):
+    def field(seq, data):
+        return struct.pack("<II", seq, len(data)) + data
+    body = struct.pack("<Q", 0) + field(0, room) + field(1, mac) + field(2, bytes([saw]))
+    return struct.pack("<II", PROBE_ID, len(body)) + body
 
 
 def redis_call(*parts):
@@ -44,35 +53,44 @@ def redis_call(*parts):
         raise RuntimeError(buffer[:200])
 
 
+def pb_fields(blob):
+    fields = []
+    offset = 0
+    while offset + 8 <= len(blob):
+        seq = int.from_bytes(blob[offset:offset + 4], "little")
+        size = int.from_bytes(blob[offset + 4:offset + 8], "little")
+        offset += 8
+        if offset + size > len(blob):
+            break
+        fields.append((seq, blob[offset:offset + size]))
+        offset += size
+    return fields
+
+
 def decode_room(blob):
     if blob is None:
         return None
-
-    def u16(offset):
-        return blob[offset] | (blob[offset + 1] << 8), offset + 2
-
-    def u32(offset):
-        return blob[offset] | (blob[offset + 1] << 8) | (blob[offset + 2] << 16) | (blob[offset + 3] << 24), offset + 4
-
-    offset = 0
-    magic, offset = u32(offset)
-    assert magic == 0x4D4F4F52
-    assert blob[offset] == 1
-    offset += 1
-    relay, offset = u32(offset)
-    count = blob[offset]
-    offset += 1
+    relay = 0
     members = []
-    for _ in range(count):
-        mac = blob[offset:offset + 6]
-        offset += 6
-        source, offset = u32(offset)
-        port, offset = u16(offset)
-        virtual, offset = u32(offset)
-        saw = blob[offset]
-        direct = blob[offset + 1]
-        offset += 2 + 8
-        members.append({"mac": mac, "ip": source, "port": port, "virtual": virtual, "direct": direct, "saw": saw})
+    for seq, data in pb_fields(blob):
+        if seq == 0 and len(data) == 4:
+            relay = int.from_bytes(data, "little")
+        elif seq == 1:
+            member = {"mac": b"", "ip": 0, "port": 0, "virtual": 0, "direct": 0, "saw": 0}
+            for field, value in pb_fields(data):
+                if field == 0:
+                    member["mac"] = value
+                elif field == 1 and len(value) == 4:
+                    member["ip"] = int.from_bytes(value, "little")
+                elif field == 2 and len(value) == 2:
+                    member["port"] = int.from_bytes(value, "little")
+                elif field == 3 and len(value) == 4:
+                    member["virtual"] = int.from_bytes(value, "little")
+                elif field == 4 and len(value) == 1:
+                    member["direct"] = value[0]
+                elif field == 5 and len(value) == 1:
+                    member["saw"] = value[0]
+            members.append(member)
     return {"relay": relay, "members": members}
 
 
@@ -306,9 +324,9 @@ def case_room(server):
     check("2 rooms isolated", beta is not None and gamma is not None and leaked is None)
     cleanup(nc, nd, c, d)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.sendto(bytes([0x4C, 0x4E, 0x52, 0x4D, 1, 1, 11, 0, 0]) + b"\x00" * 10, ("127.0.0.1", SERVER_PORT))
+    sock.sendto(probe_frame(b"", bytes.fromhex("020000000003")), ("127.0.0.1", SERVER_PORT))
     time.sleep(0.3)
-    check("3 empty room rejected", redis_call("EXISTS", "") in (b":0", None) or redis_call("GET", "") is None)
+    check("3 empty room rejected", server.proc.poll() is None and (redis_call("EXISTS", "") in (b":0", None) or redis_call("GET", "") is None))
     check("4 client has no redis code", b"RedisClient" not in CLIENT.read_bytes())
     e, ne = start_client("alpha", "02:00:00:00:00:01", 18105, "127.0.0.1")
     again = wait_members("alpha", 1)
@@ -320,7 +338,7 @@ def case_room(server):
     g, ng = start_client("alpha", "02:00:00:00:00:09", 18107, "127.0.0.3")
     wait_members("alpha", 2)
     cleanup(nf, f)
-    time.sleep(1.4)
+    time.sleep(2.5)
     left = wait_members("alpha", 1, timeout=2)
     check("6 heartbeat expiry", left is not None and len(left["members"]) == 1 and left["members"][0]["mac"] == bytes.fromhex("020000000009"))
     cleanup(ng, g)
@@ -343,11 +361,9 @@ def case_room(server):
     two_mac = wait_members("alpha", 2)
     check("9 different mac", two_mac is not None and two_mac["members"][0]["mac"] != two_mac["members"][1]["mac"] and two_mac["members"][0]["ip"] == two_mac["members"][1]["ip"])
     cleanup(nk, nl, k, l)
-    payload = bytes([4]) + b"room" + b"\x01\x02"
-    header = bytes([0x4C, 0x4E, 0x52, 0x4D, 1, 1, len(payload) & 0xFF, 0])
-    sock.sendto(header + payload, ("127.0.0.1", SERVER_PORT))
+    sock.sendto(probe_frame(b"room", b"\x01\x02"), ("127.0.0.1", SERVER_PORT))
     time.sleep(0.3)
-    check("10 bad mac rejected", redis_call("GET", "room") is None)
+    check("10 bad mac rejected", server.proc.poll() is None and redis_call("GET", "room") is None)
     sock.close()
     redis_call("DEL", "alpha", "beta", "gamma", "room")
 
@@ -433,11 +449,12 @@ def case_frames():
     first = nb.read()
     second = nb.read()
     check("19 two datagrams two frames", first == b"one" and second == b"two")
-    before = redis_call("GET", "alpha")
+    before = decode_room(redis_call("GET", "alpha"))
     rejected = na.write(b"x" * 2000)
     time.sleep(0.3)
-    after = redis_call("GET", "alpha")
-    check("20 oversize rejected", rejected == "fail" and before == after)
+    after = decode_room(redis_call("GET", "alpha"))
+    same = before is not None and after is not None and before["relay"] == after["relay"] and [(item["mac"], item["ip"], item["port"], item["virtual"]) for item in before["members"]] == [(item["mac"], item["ip"], item["port"], item["virtual"]) for item in after["members"]]
+    check("20 oversize rejected", rejected == "fail" and same)
     cleanup(na, nb, a, b)
 
 

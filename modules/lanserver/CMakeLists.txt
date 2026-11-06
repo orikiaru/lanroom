@@ -3,18 +3,22 @@ cmake_minimum_required(VERSION 3.16)
 set(MODULE_SRCS
 	src/main.cpp
 	src/roomserver.cpp
-	${CMAKE_SOURCE_DIR}/src/packet.cpp
-	${CMAKE_SOURCE_DIR}/src/room.cpp
-	${CMAKE_SOURCE_DIR}/src/peer_channel.cpp
+	src/roomudp.cpp
+	src/room_mgr.cpp
+	src/room.cpp
+	${CMAKE_SOURCE_DIR}/share/packet.cpp
+	${CMAKE_SOURCE_DIR}/share/lan_udp.cpp
 )
 add_executable(lanserver ${MODULE_SRCS})
 set_target_properties(lanserver PROPERTIES OUTPUT_NAME lanroom-server)
 target_include_directories(lanserver PRIVATE
 	inc
-	${CMAKE_SOURCE_DIR}/src
+	${CMAKE_SOURCE_DIR}/share
 	${CMAKE_SOURCE_DIR}/modules/include
 )
-target_link_libraries(lanserver PRIVATE redis_m_static proto_m_static net_m_static logger_m_static timer_m_static base_m_static jsoncpp_static)
+# 转发只在一条 poll 上跑。要扩容就多起进程。客户端另说，要接界面。
+target_compile_definitions(lanserver PRIVATE _SINGLE_THREAD_)
+target_link_libraries(lanserver PRIVATE redis_static proto_static net_static logger_static timer_static base_static jsoncpp_static)
 if(WIN32)
 	target_link_libraries(lanserver PRIVATE ws2_32)
 endif()

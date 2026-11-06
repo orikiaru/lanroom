@@ -8,15 +8,29 @@ rpcdata RoomPeer {
     4 uint8_t iDirect;
 }
 
+rpcdata RoomMember {
+    0 string sMac;
+    1 uint32_t iSourceIp;
+    2 uint16_t iSourcePort;
+    3 uint32_t iVirtualIp;
+    4 uint8_t iDirect;
+    5 uint8_t iSawPunch;
+    6 int64_t iLastSeen;
+}
+
+rpcdata RoomRecord {
+    0 uint32_t iRelayCount;
+    1 vector<RoomMember> vMembers;
+}
+
 rpcdata JoinReq {
     0 string sRoom;
     1 string sMac;
 }
 
 rpcdata JoinRes {
-    0 int32_t iCode;
-    1 uint32_t iVirtualIp;
-    2 vector<RoomPeer> vPeers;
+    0 uint32_t iVirtualIp;
+    1 vector<RoomPeer> vPeers;
 }
 
 rpcdata HeartbeatReq {
@@ -26,10 +40,55 @@ rpcdata HeartbeatReq {
 }
 
 rpcdata HeartbeatRes {
-    0 int32_t iCode;
+    0 uint32_t iVirtualIp;
+    1 vector<RoomPeer> vPeers;
+}
+
+// 下面都是 UDP 上的单向消息，不回包。生成器要求 rpc 成对，Res 只占位，线上不会出现。
+
+// 客户端发给服务器，让服务器看到这条 UDP 的来源地址。
+rpcdata ProbeReq {
+    0 string sRoom;
+    1 string sMac;
+    2 uint8_t iSawPunch;
+}
+
+rpcdata ProbeRes {
+    0 string sMac;
+}
+
+// 客户端之间打洞。
+rpcdata PunchReq {
+    0 string sMac;
+}
+
+rpcdata PunchRes {
+    0 string sMac;
+}
+
+// 一帧虚拟网卡数据。直连时客户端之间发，转发时服务器发给目标客户端。
+rpcdata FrameReq {
+    0 string sFrame;
+}
+
+rpcdata FrameRes {
+    0 string sFrame;
+}
+
+// 打不通时交给服务器，按虚拟地址转给房间里的成员。
+rpcdata RelayReq {
+    0 string sRoom;
     1 uint32_t iVirtualIp;
-    2 vector<RoomPeer> vPeers;
+    2 string sFrame;
+}
+
+rpcdata RelayRes {
+    0 uint32_t iVirtualIp;
 }
 
 rpc Join { id 4101; request JoinReq; response JoinRes; timeout 25; }
 rpc Heartbeat { id 4102; request HeartbeatReq; response HeartbeatRes; timeout 25; }
+rpc Punch { id 4103; request PunchReq; response PunchRes; timeout 25; }
+rpc Frame { id 4104; request FrameReq; response FrameRes; timeout 25; }
+rpc Relay { id 4105; request RelayReq; response RelayRes; timeout 25; }
+rpc Probe { id 4106; request ProbeReq; response ProbeRes; timeout 25; }

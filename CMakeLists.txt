@@ -4,6 +4,9 @@ project(lanroom LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Ninja 配置后把 compile_commands.json 写到构建目录，供 clangd 跳转。
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "Write compile_commands.json for clangd" FORCE)
+
 set(OI_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/openidea)
 set(BASE_LIB_PATH ${OI_ROOT}/cbaselib)
 

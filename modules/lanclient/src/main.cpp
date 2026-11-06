@@ -1,4 +1,6 @@
+#include "room_mgr.h"
 #include "roomclient.h"
+#include "roomudp.h"
 #include "oi_app.h"
 #include "oi_base.h"
 #include "oi_log.h"
@@ -61,19 +63,26 @@ int main(int iArgumentCount, char* vArguments[])
 	{
 		::OI::Log::InitLocal(NULL);
 	}
-	if (!RoomClient::GetInstance().Prepare(sRoom, sMac, sBind, sServer, (uint16_t)iServerPort, (uint16_t)iNicPort, bDrop))
+	if (!RoomMgr::GetInstance().Prepare(sRoom, sMac, sServer, (uint16_t)iServerPort, (uint16_t)iNicPort, bDrop))
 	{
 		fprintf(stderr, "usage: lanroom-client --room name --mac aa:bb:cc:dd:ee:ff --nic-port N [--bind ip] [--server ip] [--server-port N]\n");
 		return 2;
 	}
+	if (!RoomUdp::GetInstance().Init(sBind) || !RoomUdp::GetInstance().StartServer())
+	{
+		fprintf(stderr, "udp bind failed\n");
+		return 1;
+	}
+	printf("lanroom client port %u\n", RoomUdp::GetInstance().LocalPort());
+	fflush(stdout);
 	if (!RoomClient::GetInstance().Init())
 	{
 		fprintf(stderr, "RoomClient Init error\n");
 		return 1;
 	}
 	RoomClient::GetInstance().StartClient();
-	RoomClient::GetInstance().StartWork();
+	RoomMgr::GetInstance().Start();
 	iCode = ::OI::Base::RunFramework();
-	RoomClient::GetInstance().JoinWork();
+	RoomMgr::GetInstance().Stop();
 	return iCode;
 }
