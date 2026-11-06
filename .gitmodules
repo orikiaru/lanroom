@@ -1,0 +1,4 @@
+[submodule "openidea"]
+	path = openidea
+	url = https://github.com/orikiaru/openidea.git
+	branch = master
