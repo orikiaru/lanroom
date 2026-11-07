@@ -2,9 +2,11 @@
     <component name="RoomServer" type="Server">
         <rpc name="Join"/>
         <rpc name="Heartbeat"/>
+        <rpc name="Leave"/>
     </component>
     <component name="RoomClient" type="Client">
         <rpc name="Join"/>
         <rpc name="Heartbeat"/>
+        <rpc name="Leave"/>
     </component>
 </Components>

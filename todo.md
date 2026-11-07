@@ -9,12 +9,12 @@
 - 不把房间放进 openidea 的 `registry`。那套登记的是进程服务名。
 - 客户端不连接 Redis，也不相信客户端自己填的内网地址。
 - 第一版不扫别的 key，不做跨 key 查询。一个房间名对应一次单 key 读写。
-- 第一版不做 Windows 界面。界面后面再加，不挡房间和转发。
+- Windows 界面不走测试命令行。不带 `--room` 时打开窗口选房间；带 `--room` 的进程仍给 `run_cases.py` 用。
 - 自动化测试先用假网卡收发帧。真 TUN / Wintun 单独验，不让用例依赖管理员权限。
 
 ## 这一版
 
-房间、打洞、转发和假网卡已经接上。`test/run_cases.py` 会自己拉起 Redis，20 条用例都通过。系统里没有虚拟网卡：帧从本机 TCP 假网卡进出。下面两项还没做。
+房间、打洞、转发和假网卡已经接上。`test/run_cases.py` 会自己拉起 Redis，20 条用例都通过。系统里没有虚拟网卡：帧从本机 TCP 假网卡进出。Windows 上不带 `--room` 启动客户端会打开界面。真虚拟网卡还没做。
 
 ## 待办
 
@@ -25,17 +25,18 @@
 - [x] 成员心跳。停报后从这一个 key 里摘掉，并把对端从直连退回转发。
 - [x] 进房和心跳走生成出来的 TCP RPC。客户端另开一条 UDP，先发 `Probe` 给服务器让服务器看到来源地址。
 - [x] 拿到对端地址后，在同一个 UDP 口上按对端地址开会话，打洞包和直连帧发给它。发送优先直连，直连不可用就 `Relay` 给服务器。
-- [x] UDP 改用框架的 UDP 通道。服务器和客户端各有一个 `RoomUdp` 管理器，`Probe`、`Punch`、`Frame`、`Relay` 都是单向消息，收到交给各自的 `RoomMgr`。客户端的房间逻辑从 `RoomClient` 挪进 `RoomMgr`，`RoomClient` 只剩 TCP 会话。去掉了 `share/peer_channel`、`share/udp_session` 和手工拆包。
+- [x] UDP 改用框架的 UDP 通道。服务器和客户端各有一个 `RoomUdp`，只把 `Probe`、`Punch`、`Frame`、`Relay` 转给 `RoomMgr`。转发的帧由 `RoomMgr` 调 `RoomUdp` 发出。`RoomClient::Init` 启动房间循环，和 `IpcClient` 启动 `UdpMgr` 一样。假网卡的会话管理器是 `NicMgr`，会话是 `NicSession`。MAC 和 IPv4 文本在 `modules/include/lan_addr.h`。去掉了 `share` 里的通道、基类和手工拆包。
 - [x] 心跳过期差一：`member_ttl` 按整秒算，原来 `now - 上次心跳 < ttl` 在跨秒时把刚报过心跳的成员摘掉。改成超过 ttl 才摘。
 - [ ] 客户端多线程下，同一会话的两条单向消息是否按到达顺序处理，框架文档没写。用例 19 目前都过，但要框架给出保证或客户端自己按序号排。
-- [ ] 假网卡的 `READ` 在自己的线程里 `Sleep(50)` 轮询收帧队列。接真网卡时换成条件变量或交给框架等待。
+- [x] 假网卡：`NicMgr` 管 TCP 会话，`NicSession` 在 `OnDataIn` 拆行协议。`READ` 没帧就挂 2 秒定时器，帧到了由 `RoomMgr` 经 `NicMgr` 写回这条会话。
 - [x] 打洞结果写回房间记录。两边都收到对端打洞包才算直连。
 - [x] 帧转发。直连时帧不经过服务器。超时未直连时，服务器按房间记录转给另一个成员。
 - [x] 一包 UDP 就是一帧。超过单包上限的帧直接拒绝，服务器转发时也再查一次。
 - [x] 假网卡。测试用它代替真虚拟网卡，帧进假网卡、从假网卡出来。
 - [x] 进房和心跳的失败用 RPC 返回码。`OI_OK` 成功，参数不对是 `OI_ERR_INVALID_ARGUMENT`，还没看到 UDP 是 `OI_ERR_NOT_FOUND`，其余沿用框架码。回包只带虚拟地址和对端。
-- [ ] 真虚拟网卡。Linux 用 TUN，Windows 用 Wintun，只接在客户端，挂到同一条房间逻辑上。
-- [ ] Windows 界面。选房间、显示当前是直连还是服务器转发。
+- [x] 真虚拟网卡。Windows 用 Wintun，Linux 用 TUN，名字都是 lanroom。网卡读到的 IP 包进 RoomMgr 发出，收到的包写回网卡。分配到虚拟地址后设成 /24，MTU 跟单包上限一样。创建网卡要管理员权限。假网卡仍只给 `run_cases.py`。
+- [x] Windows 界面。不带 `--room` 时用系统自带的 WebView2 打开页面，填写房间、服务器和端口，加入后显示未加入、正在加入、还没有别人、直连或服务器转发。
+- [ ] 公网服务器是 `120.48.43.244`，进程在 `/home/jiangxueyang/lanroom`，TCP `17001`、UDP `17000`，Redis 只听本机 `6379`。云安全组还没放行这两个口，本机连 `17001` 失败。放行后本机开两个客户端进同一房间，验证直连和服务器转发。界面默认连这台。
 
 ## 测试用例
 

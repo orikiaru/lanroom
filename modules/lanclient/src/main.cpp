@@ -1,3 +1,5 @@
+#include "client_gui.h"
+#include "nic_mgr.h"
 #include "room_mgr.h"
 #include "roomclient.h"
 #include "roomudp.h"
@@ -11,13 +13,14 @@
 int main(int iArgumentCount, char* vArguments[])
 {
 	const char* pConfig = "config/client.toml";
-	std::string sServer = "127.0.0.1";
+	std::string sServer = "120.48.43.244";
 	std::string sRoom;
 	std::string sMac;
 	std::string sBind = "0.0.0.0";
 	int iServerPort = 17000;
 	int iNicPort = 0;
 	bool bDrop = false;
+	bool bTcp = false;
 	for (int iIndex = 1; iIndex < iArgumentCount; ++iIndex)
 	{
 		std::string sArg = vArguments[iIndex];
@@ -53,6 +56,20 @@ int main(int iArgumentCount, char* vArguments[])
 		{
 			bDrop = true;
 		}
+		else if (sArg == "--tcp")
+		{
+			bTcp = true;
+		}
+	}
+	if (sRoom.empty())
+	{
+#ifdef _WIN32
+		ClientGui stGui;
+		return stGui.Run(pConfig, sServer, iServerPort, sBind);
+#else
+		fprintf(stderr, "usage: lanroom-client --room name --mac aa:bb:cc:dd:ee:ff --nic-port N [--bind ip] [--server ip] [--server-port N]\n");
+		return 2;
+#endif
 	}
 	int iCode = ::OI::Base::StartFramework(pConfig);
 	if (iCode != 0)
@@ -63,7 +80,7 @@ int main(int iArgumentCount, char* vArguments[])
 	{
 		::OI::Log::InitLocal(NULL);
 	}
-	if (!RoomMgr::GetInstance().Prepare(sRoom, sMac, sServer, (uint16_t)iServerPort, (uint16_t)iNicPort, bDrop))
+	if (!RoomMgr::GetInstance().Prepare(sRoom, sMac, sServer, (uint16_t)iServerPort, bDrop, bTcp) || !NicMgr::GetInstance().Listen((uint16_t)iNicPort))
 	{
 		fprintf(stderr, "usage: lanroom-client --room name --mac aa:bb:cc:dd:ee:ff --nic-port N [--bind ip] [--server ip] [--server-port N]\n");
 		return 2;
@@ -80,8 +97,8 @@ int main(int iArgumentCount, char* vArguments[])
 		fprintf(stderr, "RoomClient Init error\n");
 		return 1;
 	}
+	RoomClient::GetInstance().UseHost(sServer);
 	RoomClient::GetInstance().StartClient();
-	RoomMgr::GetInstance().Start();
 	iCode = ::OI::Base::RunFramework();
 	RoomMgr::GetInstance().Stop();
 	return iCode;

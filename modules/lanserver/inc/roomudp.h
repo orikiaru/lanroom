@@ -1,11 +1,13 @@
 #pragma once
-#include "lan_udp.h"
+#include "lan_addr.h"
+#include "oi_net.h"
+#include "oi_rpc_coro.h"
 #include "oi_rpcdata_probereq.h"
 #include "oi_rpcdata_relayreq.h"
 #include "oi_singleton.h"
+#include <string>
 
-// 房间的 UDP 口。探测和转发都是单向消息，收到交给 RoomMgr，要转的帧从这里发出去。
-class RoomUdp : public ::Lan::LanUdp
+class RoomUdp : public ::OI::Rpc::ProtoSessionManager
 {
 	DECLARE_SINGLETON(RoomUdp)
 	RoomUdp();
@@ -15,6 +17,17 @@ class RoomUdp : public ::Lan::LanUdp
 
   public:
 	bool Init();
+	bool Source(sid_t iSessionId, uint32_t& iIp, uint16_t& iPort);
+	template <typename Msg>
+	int32_t Notify(uint32_t iIp, uint16_t iPort, const Msg& stMessage)
+	{
+		sid_t iSessionId = OpenPeer(::Lan::Ipv4::Text(iIp), std::to_string(iPort));
+		if (iSessionId == INVALID_SID)
+		{
+			return OI_ERR_CONNECT;
+		}
+		return ::OI::Rpc::RpcNotify(*this, iSessionId, stMessage);
+	}
 	virtual const std::string GetIDString();
 
   private:

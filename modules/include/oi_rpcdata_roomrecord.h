@@ -1,6 +1,7 @@
 #pragma once
 #include "oi_rpc.h"
 #include "oi_rpcdata_roommember.h"
+#include "oi_rpcdata_roomattr.h"
 #include "oi_json.h"
 #include <memory>
 #include <string>
@@ -11,18 +12,21 @@ class RoomRecord : public ::OI::Rpc::RpcData
 public:
     uint32_t iRelayCount{};
     std::vector<RoomMember> vMembers{};
+    RoomAttr stAttr{};
     
     explicit RoomRecord (){}
-    RoomRecord ( const uint32_t & l_iRelayCount, const std::vector<RoomMember> & l_vMembers )
+    RoomRecord ( const uint32_t & l_iRelayCount, const std::vector<RoomMember> & l_vMembers, const RoomAttr & l_stAttr )
     {
         iRelayCount = l_iRelayCount;
         vMembers = l_vMembers;
+        stAttr = l_stAttr;
         
     }
     virtual ::OI::Base::BytesStream& serialize(::OI::Base::BytesStream& os) const
     {
         os.WritePb(0, iRelayCount);
         os.WritePb(1, vMembers);
+        os.WritePb(2, stAttr);
         return os;
     }
     virtual ::OI::Base::BytesStream& deserialize(::OI::Base::BytesStream& os)
@@ -37,6 +41,7 @@ public:
             {
             case 0: os.ReadPb(field_size, iRelayCount); break;
             case 1: os.ReadPb(field_size, vMembers); break;
+            case 2: os.ReadPb(field_size, stAttr); break;
             default: os.SkipPb(field_size); break;
             }
         }
@@ -48,6 +53,7 @@ public:
         RoomRecord decoded(*this);
         if (in.isMember("iRelayCount") && !::OI::Rpc::FromJsonValue(in["iRelayCount"], decoded.iRelayCount)) return false;
         if (in.isMember("vMembers") && !::OI::Rpc::FromJsonValue(in["vMembers"], decoded.vMembers)) return false;
+        if (in.isMember("stAttr") && !::OI::Rpc::FromJsonValue(in["stAttr"], decoded.stAttr)) return false;
         *this = std::move(decoded);
         return true;
     }
@@ -66,6 +72,7 @@ public:
         out = Json::Value(Json::objectValue);
         ::OI::Rpc::ToJsonValue(out["iRelayCount"], iRelayCount);
         ::OI::Rpc::ToJsonValue(out["vMembers"], vMembers);
+        ::OI::Rpc::ToJsonValue(out["stAttr"], stAttr);
     }
     std::string ToJson() const
     {

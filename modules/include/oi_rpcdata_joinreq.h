@@ -1,5 +1,6 @@
 #pragma once
 #include "oi_rpc.h"
+#include "oi_rpcdata_roomattr.h"
 #include "oi_json.h"
 #include <memory>
 #include <string>
@@ -10,18 +11,21 @@ class JoinReq : public ::OI::Rpc::RpcData
 public:
     std::string sRoom{};
     std::string sMac{};
+    RoomAttr stAttr{};
     
     explicit JoinReq (){}
-    JoinReq ( const std::string & l_sRoom, const std::string & l_sMac )
+    JoinReq ( const std::string & l_sRoom, const std::string & l_sMac, const RoomAttr & l_stAttr )
     {
         sRoom = l_sRoom;
         sMac = l_sMac;
+        stAttr = l_stAttr;
         
     }
     virtual ::OI::Base::BytesStream& serialize(::OI::Base::BytesStream& os) const
     {
         os.WritePb(0, sRoom);
         os.WritePb(1, sMac);
+        os.WritePb(2, stAttr);
         return os;
     }
     virtual ::OI::Base::BytesStream& deserialize(::OI::Base::BytesStream& os)
@@ -35,6 +39,7 @@ public:
             {
             case 0: os.ReadPb(field_size, sRoom); break;
             case 1: os.ReadPb(field_size, sMac); break;
+            case 2: os.ReadPb(field_size, stAttr); break;
             default: os.SkipPb(field_size); break;
             }
         }
@@ -46,6 +51,7 @@ public:
         JoinReq decoded(*this);
         if (in.isMember("sRoom") && !::OI::Rpc::FromJsonValue(in["sRoom"], decoded.sRoom)) return false;
         if (in.isMember("sMac") && !::OI::Rpc::FromJsonValue(in["sMac"], decoded.sMac)) return false;
+        if (in.isMember("stAttr") && !::OI::Rpc::FromJsonValue(in["stAttr"], decoded.stAttr)) return false;
         *this = std::move(decoded);
         return true;
     }
@@ -64,6 +70,7 @@ public:
         out = Json::Value(Json::objectValue);
         ::OI::Rpc::ToJsonValue(out["sRoom"], sRoom);
         ::OI::Rpc::ToJsonValue(out["sMac"], sMac);
+        ::OI::Rpc::ToJsonValue(out["stAttr"], stAttr);
     }
     std::string ToJson() const
     {

@@ -2,22 +2,15 @@
 #include "oi_coro.h"
 #include "oi_rpcdata_roommember.h"
 #include "oi_rpcdata_roompeer.h"
+#include "oi_rpcdata_roomattr.h"
 #include "oi_rpcdata_roomrecord.h"
 #include "oi_header.h"
-#include "packet.h"
+#include "lan_addr.h"
 #include <map>
 #include <stdint.h>
 #include <time.h>
 #include <string>
 #include <vector>
-
-namespace Lan
-{
-
-bool MacFrom(const std::string& sMac, MacAddress& stMac);
-std::string MacText(const MacAddress& stMac);
-
-}
 
 class Room
 {
@@ -30,11 +23,17 @@ class Room
 
 	std::string m_sRoom;
 	::OI::RpcData::RoomRecord m_stRecord;
+	bool m_bBusy = false;
 	std::map<std::string, std::vector<SeenEndpoint>> m_mSeen;
 
 	bool SameUser(const ::OI::RpcData::RoomMember& stMember, uint32_t iSourceIp, const ::Lan::MacAddress& stMac) const;
 	uint32_t AllocateVirtual() const;
 	void RefreshDirect();
+	void AdoptTcp(bool bRequested);
+	void Touch();
+	void WritePeers(std::vector<::OI::RpcData::RoomPeer>& vPeers) const;
+	static const size_t kMemberMax = 10;
+	bool HasUser(uint32_t iSourceIp, const ::Lan::MacAddress& stMac) const;
 	bool Upsert(uint32_t iSourceIp, uint16_t iSourcePort, const ::Lan::MacAddress& stMac, bool bSawPunch, time_t iNow);
 	void Expire(time_t iNow, time_t iTtl);
 	bool Fill(uint32_t iSourceIp, const ::Lan::MacAddress& stMac, uint32_t& iVirtualIp, std::vector<::OI::RpcData::RoomPeer>& vPeers) const;
@@ -43,10 +42,18 @@ class Room
 	void Remember(const ::Lan::MacAddress& stMac, uint32_t iSourceIp, uint16_t iSourcePort);
 	bool Claim(const ::Lan::MacAddress& stMac, sid_t iSessionId, uint32_t& iSourceIp, uint16_t& iSourcePort);
 	void Release(sid_t iSessionId);
+	::OI::Coro::TaskResult<int32_t> Occupy();
+	void ReleaseBusy();
 	::OI::Coro::TaskResult<int32_t> Loaded(const std::string& sRoom);
 	::OI::Coro::TaskResult<int32_t> Saved();
-	int32_t Join(uint32_t iSourceIp, uint16_t iSourcePort, const ::Lan::MacAddress& stMac, time_t iNow, uint32_t& iVirtualIp, std::vector<::OI::RpcData::RoomPeer>& vPeers);
+	int32_t Join(uint32_t iSourceIp, uint16_t iSourcePort, const ::Lan::MacAddress& stMac, bool bTcpRelay, time_t iNow, uint32_t& iVirtualIp, std::vector<::OI::RpcData::RoomPeer>& vPeers);
 	int32_t Update(uint32_t iSourceIp, uint16_t iSourcePort, const ::Lan::MacAddress& stMac, bool bSawPunch, time_t iNow, time_t iTtl, uint32_t& iVirtualIp, std::vector<::OI::RpcData::RoomPeer>& vPeers);
+	bool Remove(uint32_t iSourceIp, const ::Lan::MacAddress& stMac);
 	const ::OI::RpcData::RoomMember* FindVirtual(uint32_t iVirtualIp) const;
 	void CountRelay();
+	uint8_t TcpRelay() const;
+	const ::OI::RpcData::RoomAttr& Attr() const;
+	const std::string& Name() const;
+	void CopyPeers(std::vector<::OI::RpcData::RoomPeer>& vPeers) const;
+	void CollectSessions(sid_t iExcept, std::vector<sid_t>& vSessions) const;
 };

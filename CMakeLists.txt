@@ -27,6 +27,7 @@ else()
 	add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-Wall>")
 	add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-Wextra>")
 	add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-Werror>")
+	add_compile_options(-Wno-error)
 	add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-std=gnu++20>")
 endif()
 

@@ -1,5 +1,5 @@
 #include "roomudp.h"
-#include "oi_rpcdata_framereq.h"
+#include "oi_socket.h"
 #include "room_mgr.h"
 #include "rpc_ids.h"
 
@@ -12,11 +12,24 @@ const std::string RoomUdp::GetIDString()
 	return "RoomUdp";
 }
 
+bool RoomUdp::Source(sid_t iSessionId, uint32_t& iIp, uint16_t& iPort)
+{
+	::OI::Net::NetAddr stAddr;
+	if (!GetPeerAddr(iSessionId, stAddr) || stAddr.Family() != AF_INET)
+	{
+		return false;
+	}
+	const sockaddr_in* pAddr = (const sockaddr_in*)stAddr.NetAttrPtr();
+	iIp = ntohl(pAddr->sin_addr.s_addr);
+	iPort = stAddr.Port();
+	return true;
+}
+
 ::OI::Rpc::RpcTask RoomUdp::HandleProbe(const ::OI::Rpc::RpcContext& stContext, const ::OI::RpcData::ProbeReq& stRequest)
 {
 	uint32_t iSourceIp = 0;
 	uint16_t iSourcePort = 0;
-	if (!SourceOf(stContext.iSessionId, iSourceIp, iSourcePort))
+	if (!Source(stContext.iSessionId, iSourceIp, iSourcePort))
 	{
 		co_return OI_ERR_NOT_FOUND;
 	}
@@ -27,27 +40,18 @@ const std::string RoomUdp::GetIDString()
 {
 	uint32_t iSourceIp = 0;
 	uint16_t iSourcePort = 0;
-	if (!SourceOf(stContext.iSessionId, iSourceIp, iSourcePort))
+	if (!Source(stContext.iSessionId, iSourceIp, iSourcePort))
 	{
 		co_return OI_ERR_NOT_FOUND;
 	}
-	uint32_t iTargetIp = 0;
-	uint16_t iTargetPort = 0;
-	const int32_t iRelayed = co_await RoomMgr::GetInstance().Relay(stRequest, iSourceIp, iSourcePort, iTargetIp, iTargetPort);
-	if (iRelayed != OI_OK)
-	{
-		co_return iRelayed;
-	}
-	::OI::RpcData::FrameReq stFrame;
-	stFrame.sFrame = stRequest.sFrame;
-	co_return NotifyTo(iTargetIp, iTargetPort, stFrame);
+	co_return co_await RoomMgr::GetInstance().Relay(stRequest, iSourceIp, iSourcePort);
 }
 
 bool RoomUdp::Init()
 {
 	OI_NOTIFY_BIND_SELF(Probe, RoomUdp, HandleProbe);
 	OI_NOTIFY_BIND_SELF(Relay, RoomUdp, HandleRelay);
-	return ::Lan::LanUdp::Init();
+	return ::OI::Rpc::ProtoSessionManager::Init();
 }
 
 void RoomUdp::OnAddSession(::OI::Net::Session* pSession)

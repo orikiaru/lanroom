@@ -11,6 +11,8 @@
 
 int main(int iArgumentCount, char* vArguments[])
 {
+	setvbuf(stdout, NULL, _IONBF, 0);
+	setvbuf(stderr, NULL, _IONBF, 0);
 	const char* pConfig = iArgumentCount > 1 ? vArguments[1] : "config/server.toml";
 	int iCode = ::OI::Base::StartFramework(pConfig);
 	if (iCode != 0)

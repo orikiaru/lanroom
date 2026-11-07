@@ -71,10 +71,15 @@ def decode_room(blob):
     if blob is None:
         return None
     relay = 0
+    tcp = 0
     members = []
     for seq, data in pb_fields(blob):
         if seq == 0 and len(data) == 4:
             relay = int.from_bytes(data, "little")
+        elif seq == 2:
+            for field, value in pb_fields(data):
+                if field == 0 and len(value) == 1:
+                    tcp = value[0]
         elif seq == 1:
             member = {"mac": b"", "ip": 0, "port": 0, "virtual": 0, "direct": 0, "saw": 0}
             for field, value in pb_fields(data):
@@ -91,7 +96,7 @@ def decode_room(blob):
                 elif field == 5 and len(value) == 1:
                     member["saw"] = value[0]
             members.append(member)
-    return {"relay": relay, "members": members}
+    return {"relay": relay, "tcp": tcp, "members": members}
 
 
 LIVE = []
@@ -158,10 +163,12 @@ class Nic:
         return [self.line() for _ in range(count)]
 
 
-def start_client(room, mac, nic_port, bind="0.0.0.0", drop=False):
+def start_client(room, mac, nic_port, bind="0.0.0.0", drop=False, tcp=False):
     args = [str(CLIENT), "--config", "config/client.toml", "--server", "127.0.0.1", "--server-port", str(SERVER_PORT), "--room", room, "--mac", mac, "--nic-port", str(nic_port), "--bind", bind]
     if drop:
         args.append("--drop")
+    if tcp:
+        args.append("--tcp")
     proc = Proc(args)
     nic = None
     deadline = time.time() + 8
@@ -435,6 +442,19 @@ def case_forward():
     alone = decode_room(redis_call("GET", "alone"))
     check("18 single user does not relay", one is not None and alone is not None and alone["relay"] == 0 and alone["members"][0]["direct"] == 0)
     cleanup(ne, e)
+    redis_call("DEL", "tcproom")
+    f, nf = start_client("tcproom", "02:00:00:00:00:51", 18151, "127.0.0.1", tcp=True)
+    g, ng = start_client("tcproom", "02:00:00:00:00:52", 18152, "127.0.0.2")
+    wait_members("tcproom", 2)
+    time.sleep(0.8)
+    before = decode_room(redis_call("GET", "tcproom"))
+    nf.write(b"tcp-frame")
+    time.sleep(0.8)
+    got = ng.read()
+    after = decode_room(redis_call("GET", "tcproom"))
+    stayed = after is not None and after["tcp"] == 1 and all(item["direct"] == 0 for item in after["members"])
+    check("21 tcp room carries the frame", before is not None and before["tcp"] == 1 and got == b"tcp-frame" and stayed and after["relay"] > before["relay"])
+    cleanup(nf, ng, f, g)
 
 
 def case_frames():

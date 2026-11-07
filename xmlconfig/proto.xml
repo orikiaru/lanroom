@@ -18,19 +18,28 @@ rpcdata RoomMember {
     6 int64_t iLastSeen;
 }
 
+// 房间创建时定下的属性。iVersion 每次进房或心跳加一，客户端用它丢掉过期的快照。
+rpcdata RoomAttr {
+    0 uint8_t iTcpRelay;
+    1 uint32_t iVersion;
+}
+
 rpcdata RoomRecord {
     0 uint32_t iRelayCount;
     1 vector<RoomMember> vMembers;
+    2 RoomAttr stAttr;
 }
 
 rpcdata JoinReq {
     0 string sRoom;
     1 string sMac;
+    2 RoomAttr stAttr;
 }
 
 rpcdata JoinRes {
     0 uint32_t iVirtualIp;
     1 vector<RoomPeer> vPeers;
+    2 RoomAttr stAttr;
 }
 
 rpcdata HeartbeatReq {
@@ -42,6 +51,16 @@ rpcdata HeartbeatReq {
 rpcdata HeartbeatRes {
     0 uint32_t iVirtualIp;
     1 vector<RoomPeer> vPeers;
+    2 RoomAttr stAttr;
+}
+
+rpcdata LeaveReq {
+    0 string sRoom;
+    1 string sMac;
+}
+
+rpcdata LeaveRes {
+    0 uint8_t iLeft;
 }
 
 // 下面都是 UDP 上的单向消息，不回包。生成器要求 rpc 成对，Res 只占位，线上不会出现。
@@ -86,9 +105,39 @@ rpcdata RelayRes {
     0 uint32_t iVirtualIp;
 }
 
+// 房间创建时勾了强制 TCP。客户端把帧从 TCP 送上来，服务器再按 UDP 转给对端。
+rpcdata CarryReq {
+    0 string sRoom;
+    1 string sMac;
+    2 uint32_t iVirtualIp;
+    3 string sFrame;
+}
+
+rpcdata CarryRes {
+    0 uint32_t iVirtualIp;
+}
+
+// 服务器在有人加入后，沿已有的 TCP 连接推给房间里的其他人。
+rpcdata RoomCastReq {
+    0 string sRoom;
+    1 vector<RoomPeer> vPeers;
+    2 RoomAttr stAttr;
+}
+
+rpcdata RoomCastRes {
+    0 string sRoom;
+}
+
+errordef RoomError {
+    ROOM_ERR_FULL = 4201;
+}
+
 rpc Join { id 4101; request JoinReq; response JoinRes; timeout 25; }
 rpc Heartbeat { id 4102; request HeartbeatReq; response HeartbeatRes; timeout 25; }
+rpc Leave { id 4109; request LeaveReq; response LeaveRes; timeout 25; }
 rpc Punch { id 4103; request PunchReq; response PunchRes; timeout 25; }
 rpc Frame { id 4104; request FrameReq; response FrameRes; timeout 25; }
 rpc Relay { id 4105; request RelayReq; response RelayRes; timeout 25; }
 rpc Probe { id 4106; request ProbeReq; response ProbeRes; timeout 25; }
+rpc Carry { id 4107; request CarryReq; response CarryRes; timeout 25; }
+rpc RoomCast { id 4108; request RoomCastReq; response RoomCastRes; timeout 25; }

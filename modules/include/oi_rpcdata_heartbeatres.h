@@ -1,6 +1,7 @@
 #pragma once
 #include "oi_rpc.h"
 #include "oi_rpcdata_roompeer.h"
+#include "oi_rpcdata_roomattr.h"
 #include "oi_json.h"
 #include <memory>
 #include <string>
@@ -11,18 +12,21 @@ class HeartbeatRes : public ::OI::Rpc::RpcData
 public:
     uint32_t iVirtualIp{};
     std::vector<RoomPeer> vPeers{};
+    RoomAttr stAttr{};
     
     explicit HeartbeatRes (){}
-    HeartbeatRes ( const uint32_t & l_iVirtualIp, const std::vector<RoomPeer> & l_vPeers )
+    HeartbeatRes ( const uint32_t & l_iVirtualIp, const std::vector<RoomPeer> & l_vPeers, const RoomAttr & l_stAttr )
     {
         iVirtualIp = l_iVirtualIp;
         vPeers = l_vPeers;
+        stAttr = l_stAttr;
         
     }
     virtual ::OI::Base::BytesStream& serialize(::OI::Base::BytesStream& os) const
     {
         os.WritePb(0, iVirtualIp);
         os.WritePb(1, vPeers);
+        os.WritePb(2, stAttr);
         return os;
     }
     virtual ::OI::Base::BytesStream& deserialize(::OI::Base::BytesStream& os)
@@ -37,6 +41,7 @@ public:
             {
             case 0: os.ReadPb(field_size, iVirtualIp); break;
             case 1: os.ReadPb(field_size, vPeers); break;
+            case 2: os.ReadPb(field_size, stAttr); break;
             default: os.SkipPb(field_size); break;
             }
         }
@@ -48,6 +53,7 @@ public:
         HeartbeatRes decoded(*this);
         if (in.isMember("iVirtualIp") && !::OI::Rpc::FromJsonValue(in["iVirtualIp"], decoded.iVirtualIp)) return false;
         if (in.isMember("vPeers") && !::OI::Rpc::FromJsonValue(in["vPeers"], decoded.vPeers)) return false;
+        if (in.isMember("stAttr") && !::OI::Rpc::FromJsonValue(in["stAttr"], decoded.stAttr)) return false;
         *this = std::move(decoded);
         return true;
     }
@@ -66,6 +72,7 @@ public:
         out = Json::Value(Json::objectValue);
         ::OI::Rpc::ToJsonValue(out["iVirtualIp"], iVirtualIp);
         ::OI::Rpc::ToJsonValue(out["vPeers"], vPeers);
+        ::OI::Rpc::ToJsonValue(out["stAttr"], stAttr);
     }
     std::string ToJson() const
     {

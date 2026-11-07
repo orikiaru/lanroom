@@ -1,27 +1,8 @@
 #include "room.h"
 #include "oi_errno.h"
+#include "oi_log.h"
 #include "oi_redis_cmd.h"
-#include <string.h>
-
-namespace Lan
-{
-
-bool MacFrom(const std::string& sMac, MacAddress& stMac)
-{
-	if (sMac.size() != kMacLength)
-	{
-		return false;
-	}
-	memcpy(stMac.vBytes, sMac.data(), kMacLength);
-	return true;
-}
-
-std::string MacText(const MacAddress& stMac)
-{
-	return std::string((const char*)stMac.vBytes, kMacLength);
-}
-
-}
+#include "rpc_enums.h"
 
 void Room::Remember(const ::Lan::MacAddress& stMac, uint32_t iSourceIp, uint16_t iSourcePort)
 {
@@ -29,7 +10,7 @@ void Room::Remember(const ::Lan::MacAddress& stMac, uint32_t iSourceIp, uint16_t
 	{
 		return;
 	}
-	std::vector<SeenEndpoint>& vSeen = m_mSeen[::Lan::MacText(stMac)];
+	std::vector<SeenEndpoint>& vSeen = m_mSeen[stMac.Bytes()];
 	for (SeenEndpoint& stSlot : vSeen)
 	{
 		if (stSlot.iSourceIp == iSourceIp)
@@ -46,7 +27,7 @@ void Room::Remember(const ::Lan::MacAddress& stMac, uint32_t iSourceIp, uint16_t
 
 bool Room::Claim(const ::Lan::MacAddress& stMac, sid_t iSessionId, uint32_t& iSourceIp, uint16_t& iSourcePort)
 {
-	auto itSeen = m_mSeen.find(::Lan::MacText(stMac));
+	auto itSeen = m_mSeen.find(stMac.Bytes());
 	if (itSeen == m_mSeen.end())
 	{
 		return false;
@@ -91,7 +72,7 @@ void Room::Release(sid_t iSessionId)
 
 bool Room::SameUser(const ::OI::RpcData::RoomMember& stMember, uint32_t iSourceIp, const ::Lan::MacAddress& stMac) const
 {
-	return stMember.iSourceIp == iSourceIp && stMember.sMac == ::Lan::MacText(stMac);
+	return stMember.iSourceIp == iSourceIp && stMember.sMac == stMac.Bytes();
 }
 
 uint32_t Room::AllocateVirtual() const
@@ -117,8 +98,24 @@ uint32_t Room::AllocateVirtual() const
 	return 0;
 }
 
+void Room::AdoptTcp(bool bRequested)
+{
+	if (m_stRecord.vMembers.empty())
+	{
+		m_stRecord.stAttr.iTcpRelay = bRequested ? 1 : 0;
+	}
+}
+
 void Room::RefreshDirect()
 {
+	if (m_stRecord.stAttr.iTcpRelay != 0)
+	{
+		for (::OI::RpcData::RoomMember& stMember : m_stRecord.vMembers)
+		{
+			stMember.iDirect = 0;
+		}
+		return;
+	}
 	bool bAllSaw = m_stRecord.vMembers.size() >= 2;
 	for (const ::OI::RpcData::RoomMember& stMember : m_stRecord.vMembers)
 	{
@@ -134,6 +131,18 @@ void Room::RefreshDirect()
 	}
 }
 
+bool Room::HasUser(uint32_t iSourceIp, const ::Lan::MacAddress& stMac) const
+{
+	for (const ::OI::RpcData::RoomMember& stMember : m_stRecord.vMembers)
+	{
+		if (SameUser(stMember, iSourceIp, stMac))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 bool Room::Upsert(uint32_t iSourceIp, uint16_t iSourcePort, const ::Lan::MacAddress& stMac, bool bSawPunch, time_t iNow)
 {
 	for (::OI::RpcData::RoomMember& stMember : m_stRecord.vMembers)
@@ -144,6 +153,7 @@ bool Room::Upsert(uint32_t iSourceIp, uint16_t iSourcePort, const ::Lan::MacAddr
 		}
 		if (stMember.iSourcePort != iSourcePort)
 		{
+			LOG_INFO("Room::Upsert port room=%s mac=%s old=%u new=%u", m_sRoom.c_str(), stMac.Colon().c_str(), stMember.iSourcePort, iSourcePort);
 			stMember.iSawPunch = 0;
 		}
 		stMember.iSourcePort = iSourcePort;
@@ -156,7 +166,7 @@ bool Room::Upsert(uint32_t iSourceIp, uint16_t iSourcePort, const ::Lan::MacAddr
 		return true;
 	}
 	::OI::RpcData::RoomMember stMember;
-	stMember.sMac = ::Lan::MacText(stMac);
+	stMember.sMac = stMac.Bytes();
 	stMember.iSourceIp = iSourceIp;
 	stMember.iSourcePort = iSourcePort;
 	stMember.iVirtualIp = AllocateVirtual();
@@ -164,8 +174,10 @@ bool Room::Upsert(uint32_t iSourceIp, uint16_t iSourcePort, const ::Lan::MacAddr
 	stMember.iLastSeen = iNow;
 	if (stMember.iVirtualIp == 0)
 	{
+		LOG_WARNING("Room::Upsert full room=%s mac=%s", m_sRoom.c_str(), stMac.Colon().c_str());
 		return false;
 	}
+	LOG_INFO("Room::Upsert new room=%s mac=%s src=%s:%u virt=%s", m_sRoom.c_str(), stMac.Colon().c_str(), ::Lan::Ipv4::Text(iSourceIp).c_str(), iSourcePort, ::Lan::Ipv4::Text(stMember.iVirtualIp).c_str());
 	m_stRecord.vMembers.push_back(stMember);
 	RefreshDirect();
 	return true;
@@ -179,6 +191,11 @@ void Room::Expire(time_t iNow, time_t iTtl)
 		if (iNow - (time_t)stMember.iLastSeen <= iTtl)
 		{
 			vAlive.push_back(stMember);
+		}
+		else
+		{
+			::Lan::MacAddress stMac;
+			LOG_INFO("Room::Expire room=%s mac=%s virt=%s", m_sRoom.c_str(), (stMac.From(stMember.sMac) ? stMac.Colon() : std::string("invalid")).c_str(), ::Lan::Ipv4::Text(stMember.iVirtualIp).c_str());
 		}
 	}
 	m_stRecord.vMembers.swap(vAlive);
@@ -202,6 +219,13 @@ bool Room::Fill(uint32_t iSourceIp, const ::Lan::MacAddress& stMac, uint32_t& iV
 	{
 		return false;
 	}
+	WritePeers(vPeers);
+	return true;
+}
+
+void Room::WritePeers(std::vector<::OI::RpcData::RoomPeer>& vPeers) const
+{
+	vPeers.clear();
 	for (const ::OI::RpcData::RoomMember& stMember : m_stRecord.vMembers)
 	{
 		::OI::RpcData::RoomPeer stPeer;
@@ -212,19 +236,77 @@ bool Room::Fill(uint32_t iSourceIp, const ::Lan::MacAddress& stMac, uint32_t& iV
 		stPeer.iDirect = stMember.iDirect;
 		vPeers.push_back(stPeer);
 	}
-	return true;
+}
+
+void Room::Touch()
+{
+	m_stRecord.stAttr.iVersion += 1;
+}
+
+void Room::CollectSessions(sid_t iExcept, std::vector<sid_t>& vSessions) const
+{
+	vSessions.clear();
+	for (const ::OI::RpcData::RoomMember& stMember : m_stRecord.vMembers)
+	{
+		auto itSeen = m_mSeen.find(stMember.sMac);
+		if (itSeen == m_mSeen.end())
+		{
+			continue;
+		}
+		for (const SeenEndpoint& stSlot : itSeen->second)
+		{
+			if (stSlot.iOwner == 0 || stSlot.iOwner == iExcept || stSlot.iSourceIp != stMember.iSourceIp)
+			{
+				continue;
+			}
+			bool bHave = false;
+			for (sid_t iSessionId : vSessions)
+			{
+				if (iSessionId == stSlot.iOwner)
+				{
+					bHave = true;
+					break;
+				}
+			}
+			if (!bHave)
+			{
+				vSessions.push_back(stSlot.iOwner);
+			}
+		}
+	}
+}
+
+::OI::Coro::TaskResult<int32_t> Room::Occupy()
+{
+	while (m_bBusy)
+	{
+		co_await ::OI::Coro::yield(1);
+	}
+	m_bBusy = true;
+	co_return OI_OK;
+}
+
+void Room::ReleaseBusy()
+{
+	m_bBusy = false;
 }
 
 ::OI::Coro::TaskResult<int32_t> Room::Loaded(const std::string& sRoom)
 {
 	m_sRoom = sRoom;
-	m_stRecord = ::OI::RpcData::RoomRecord();
-	const int32_t iRet = co_await ::OI::Redis::RedisGet(m_sRoom, m_stRecord);
+	::OI::RpcData::RoomRecord stLoaded;
+	const int32_t iRet = co_await ::OI::Redis::RedisGet(m_sRoom, stLoaded);
 	if (iRet == OI_ERR_NOT_FOUND)
 	{
+		m_stRecord = ::OI::RpcData::RoomRecord();
 		co_return OI_OK;
 	}
-	co_return iRet;
+	if (iRet != OI_OK)
+	{
+		co_return iRet;
+	}
+	m_stRecord = stLoaded;
+	co_return OI_OK;
 }
 
 ::OI::Coro::TaskResult<int32_t> Room::Saved()
@@ -241,23 +323,59 @@ bool Room::Fill(uint32_t iSourceIp, const ::Lan::MacAddress& stMac, uint32_t& iV
 	co_return co_await ::OI::Redis::RedisSet(m_sRoom, m_stRecord);
 }
 
-int32_t Room::Join(uint32_t iSourceIp, uint16_t iSourcePort, const ::Lan::MacAddress& stMac, time_t iNow, uint32_t& iVirtualIp, std::vector<::OI::RpcData::RoomPeer>& vPeers)
+int32_t Room::Join(uint32_t iSourceIp, uint16_t iSourcePort, const ::Lan::MacAddress& stMac, bool bTcpRelay, time_t iNow, uint32_t& iVirtualIp, std::vector<::OI::RpcData::RoomPeer>& vPeers)
 {
+	AdoptTcp(bTcpRelay);
+	if (!HasUser(iSourceIp, stMac) && m_stRecord.vMembers.size() >= kMemberMax)
+	{
+		LOG_WARNING("Room::Join full room=%s mac=%s members=%zu", m_sRoom.c_str(), stMac.Colon().c_str(), m_stRecord.vMembers.size());
+		return ::OI::RpcData::ROOM_ERR_FULL;
+	}
 	if (!Upsert(iSourceIp, iSourcePort, stMac, false, iNow) || !Fill(iSourceIp, stMac, iVirtualIp, vPeers))
 	{
 		return OI_ERR_FAIL;
 	}
+	Touch();
 	return OI_OK;
 }
 
 int32_t Room::Update(uint32_t iSourceIp, uint16_t iSourcePort, const ::Lan::MacAddress& stMac, bool bSawPunch, time_t iNow, time_t iTtl, uint32_t& iVirtualIp, std::vector<::OI::RpcData::RoomPeer>& vPeers)
 {
 	Expire(iNow, iTtl);
+	if (!HasUser(iSourceIp, stMac) && m_stRecord.vMembers.size() >= kMemberMax)
+	{
+		LOG_WARNING("Room::Update full room=%s mac=%s members=%zu", m_sRoom.c_str(), stMac.Colon().c_str(), m_stRecord.vMembers.size());
+		return ::OI::RpcData::ROOM_ERR_FULL;
+	}
 	if (!Upsert(iSourceIp, iSourcePort, stMac, bSawPunch, iNow) || !Fill(iSourceIp, stMac, iVirtualIp, vPeers))
 	{
 		return OI_ERR_FAIL;
 	}
+	Touch();
 	return OI_OK;
+}
+
+bool Room::Remove(uint32_t iSourceIp, const ::Lan::MacAddress& stMac)
+{
+	std::vector<::OI::RpcData::RoomMember> vLeft;
+	bool bRemoved = false;
+	for (const ::OI::RpcData::RoomMember& stMember : m_stRecord.vMembers)
+	{
+		if (!bRemoved && SameUser(stMember, iSourceIp, stMac))
+		{
+			bRemoved = true;
+			continue;
+		}
+		vLeft.push_back(stMember);
+	}
+	if (!bRemoved)
+	{
+		return false;
+	}
+	m_stRecord.vMembers.swap(vLeft);
+	RefreshDirect();
+	Touch();
+	return true;
 }
 
 const ::OI::RpcData::RoomMember* Room::FindVirtual(uint32_t iVirtualIp) const
@@ -275,4 +393,24 @@ const ::OI::RpcData::RoomMember* Room::FindVirtual(uint32_t iVirtualIp) const
 void Room::CountRelay()
 {
 	m_stRecord.iRelayCount += 1;
+}
+
+uint8_t Room::TcpRelay() const
+{
+	return m_stRecord.stAttr.iTcpRelay;
+}
+
+const ::OI::RpcData::RoomAttr& Room::Attr() const
+{
+	return m_stRecord.stAttr;
+}
+
+const std::string& Room::Name() const
+{
+	return m_sRoom;
+}
+
+void Room::CopyPeers(std::vector<::OI::RpcData::RoomPeer>& vPeers) const
+{
+	WritePeers(vPeers);
 }
