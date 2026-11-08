@@ -9,13 +9,6 @@
 #include "roomserver.h"
 #include "rpc_ids.h"
 
-struct RoomBusy
-{
-	Room& stRoom;
-	explicit RoomBusy(Room& stRoomIn) : stRoom(stRoomIn) {}
-	~RoomBusy() { stRoom.ReleaseBusy(); }
-};
-
 RoomMgr::RoomMgr()
 {
 }
@@ -25,18 +18,42 @@ void RoomMgr::Init()
 	int64_t iTtl = 1;
 	::OI::Base::Config::GlobalConfig().GetAs("LanServer.member_ttl", iTtl);
 	m_iMemberTtl = (time_t)iTtl;
+	::OI::Coro::StartTask([](::OI::Coro::Token)
+	{
+		return RoomMgr::GetInstance().Update();
+	});
 }
 
-Room& RoomMgr::Take(const std::string& sRoom)
+std::shared_ptr<Room> RoomMgr::Take(const std::string& sRoom)
 {
-	return m_mRoom[sRoom];
+	std::shared_ptr<Room>& pRoom = m_mRoom[sRoom];
+	if (!pRoom)
+	{
+		pRoom = std::make_shared<Room>();
+	}
+	return pRoom;
+}
+
+::OI::Coro::TaskResult<std::shared_ptr<Room>> RoomMgr::Load(const std::string& sRoom)
+{
+	std::shared_ptr<Room> pRoom = Take(sRoom);
+	if (!pRoom->Ready())
+	{
+		const int32_t iLoaded = co_await pRoom->Loaded(sRoom);
+		if (iLoaded != OI_OK)
+		{
+			LOG_WARNING("RoomMgr::Load room=%s code=%d", sRoom.c_str(), iLoaded);
+			co_return std::shared_ptr<Room>();
+		}
+	}
+	co_return pRoom;
 }
 
 void RoomMgr::ReleaseSession(sid_t iSessionId)
 {
 	for (auto& stEntry : m_mRoom)
 	{
-		stEntry.second.Release(iSessionId);
+		stEntry.second->Release(iSessionId);
 	}
 }
 
@@ -48,7 +65,7 @@ int32_t RoomMgr::Probe(const ::OI::RpcData::ProbeReq& stProbe, uint32_t iSourceI
 		LOG_WARNING("RoomMgr::Probe reject src=%s:%u", ::Lan::Ipv4::Text(iSourceIp).c_str(), iSourcePort);
 		return OI_ERR_INVALID_ARGUMENT;
 	}
-	Take(stProbe.sRoom).Remember(stMac, iSourceIp, iSourcePort);
+	Take(stProbe.sRoom)->Remember(stMac, iSourceIp, iSourcePort);
 	return OI_OK;
 }
 
@@ -60,21 +77,18 @@ int32_t RoomMgr::Probe(const ::OI::RpcData::ProbeReq& stProbe, uint32_t iSourceI
 		LOG_WARNING("RoomMgr::Join reject room=%s", stRequest.sRoom.c_str());
 		co_return OI_ERR_INVALID_ARGUMENT;
 	}
-	Room& stRoom = Take(stRequest.sRoom);
-	co_await stRoom.Occupy();
-	RoomBusy stBusy(stRoom);
+	std::shared_ptr<Room> pRoom = co_await Load(stRequest.sRoom);
+	if (!pRoom)
+	{
+		co_return OI_ERR_FAIL;
+	}
+	Room& stRoom = *pRoom;
 	uint32_t iSourceIp = 0;
 	uint16_t iSourcePort = 0;
-	if (!stRoom.Claim(stMac, stContext.iSessionId, iSourceIp, iSourcePort))
+	if (!stRoom.Replace(stMac, stContext.iSessionId, iSourceIp, iSourcePort))
 	{
 		LOG_WARNING("RoomMgr::Join reject room=%s mac=%s sid=%d reason=no-probe", stRequest.sRoom.c_str(), stMac.Colon().c_str(), stContext.iSessionId);
 		co_return OI_ERR_NOT_FOUND;
-	}
-	const int32_t iLoaded = co_await stRoom.Loaded(stRequest.sRoom);
-	if (iLoaded != OI_OK)
-	{
-		LOG_WARNING("RoomMgr::Join load room=%s code=%d", stRequest.sRoom.c_str(), iLoaded);
-		co_return iLoaded;
 	}
 	const int32_t iJoined = stRoom.Join(iSourceIp, iSourcePort, stMac, stRequest.stAttr.iTcpRelay != 0, ::OI::Timer::GetTime(), stResponse.iVirtualIp, stResponse.vPeers);
 	if (iJoined != OI_OK)
@@ -92,6 +106,7 @@ int32_t RoomMgr::Probe(const ::OI::RpcData::ProbeReq& stProbe, uint32_t iSourceI
 	const int32_t iSaved = co_await stRoom.Saved();
 	if (iSaved != OI_OK)
 	{
+		LOG_WARNING("RoomMgr::Join save room=%s code=%d", stRequest.sRoom.c_str(), iSaved);
 		co_return iSaved;
 	}
 	Broadcast(stRequest.sRoom, vSessions, vPeers, stAttr);
@@ -106,21 +121,18 @@ int32_t RoomMgr::Probe(const ::OI::RpcData::ProbeReq& stProbe, uint32_t iSourceI
 		LOG_WARNING("RoomMgr::Heartbeat reject room=%s", stRequest.sRoom.c_str());
 		co_return OI_ERR_INVALID_ARGUMENT;
 	}
-	Room& stRoom = Take(stRequest.sRoom);
-	co_await stRoom.Occupy();
-	RoomBusy stBusy(stRoom);
+	std::shared_ptr<Room> pRoom = co_await Load(stRequest.sRoom);
+	if (!pRoom)
+	{
+		co_return OI_ERR_FAIL;
+	}
+	Room& stRoom = *pRoom;
 	uint32_t iSourceIp = 0;
 	uint16_t iSourcePort = 0;
 	if (!stRoom.Claim(stMac, stContext.iSessionId, iSourceIp, iSourcePort))
 	{
 		LOG_WARNING("RoomMgr::Heartbeat reject room=%s mac=%s sid=%d reason=no-probe", stRequest.sRoom.c_str(), stMac.Colon().c_str(), stContext.iSessionId);
 		co_return OI_ERR_NOT_FOUND;
-	}
-	const int32_t iLoaded = co_await stRoom.Loaded(stRequest.sRoom);
-	if (iLoaded != OI_OK)
-	{
-		LOG_WARNING("RoomMgr::Heartbeat load room=%s code=%d", stRequest.sRoom.c_str(), iLoaded);
-		co_return iLoaded;
 	}
 	const int32_t iUpdated = stRoom.Update(iSourceIp, iSourcePort, stMac, stRequest.iSawPunch != 0, ::OI::Timer::GetTime(), m_iMemberTtl, stResponse.iVirtualIp, stResponse.vPeers);
 	if (iUpdated != OI_OK)
@@ -129,7 +141,13 @@ int32_t RoomMgr::Probe(const ::OI::RpcData::ProbeReq& stProbe, uint32_t iSourceI
 		co_return iUpdated;
 	}
 	stResponse.stAttr = stRoom.Attr();
-	co_return co_await stRoom.Saved();
+	const int32_t iSaved = co_await stRoom.Saved();
+	if (iSaved != OI_OK)
+	{
+		LOG_WARNING("RoomMgr::Heartbeat save room=%s code=%d", stRequest.sRoom.c_str(), iSaved);
+		co_return iSaved;
+	}
+	co_return OI_OK;
 }
 
 ::OI::Rpc::RpcTask RoomMgr::Leave(const ::OI::Rpc::RpcContext& stContext, const ::OI::RpcData::LeaveReq& stRequest, ::OI::RpcData::LeaveRes& stResponse)
@@ -140,21 +158,18 @@ int32_t RoomMgr::Probe(const ::OI::RpcData::ProbeReq& stProbe, uint32_t iSourceI
 		LOG_WARNING("RoomMgr::Leave reject room=%s", stRequest.sRoom.c_str());
 		co_return OI_ERR_INVALID_ARGUMENT;
 	}
-	Room& stRoom = Take(stRequest.sRoom);
-	co_await stRoom.Occupy();
-	RoomBusy stBusy(stRoom);
+	std::shared_ptr<Room> pRoom = co_await Load(stRequest.sRoom);
+	if (!pRoom)
+	{
+		co_return OI_ERR_FAIL;
+	}
+	Room& stRoom = *pRoom;
 	uint32_t iSourceIp = 0;
 	uint16_t iSourcePort = 0;
 	if (!stRoom.Claim(stMac, stContext.iSessionId, iSourceIp, iSourcePort))
 	{
 		LOG_WARNING("RoomMgr::Leave reject room=%s mac=%s sid=%d reason=no-probe", stRequest.sRoom.c_str(), stMac.Colon().c_str(), stContext.iSessionId);
 		co_return OI_ERR_NOT_FOUND;
-	}
-	const int32_t iLoaded = co_await stRoom.Loaded(stRequest.sRoom);
-	if (iLoaded != OI_OK)
-	{
-		LOG_WARNING("RoomMgr::Leave load room=%s code=%d", stRequest.sRoom.c_str(), iLoaded);
-		co_return iLoaded;
 	}
 	if (!stRoom.Remove(iSourceIp, stMac))
 	{
@@ -171,6 +186,7 @@ int32_t RoomMgr::Probe(const ::OI::RpcData::ProbeReq& stProbe, uint32_t iSourceI
 	const int32_t iSaved = co_await stRoom.Saved();
 	if (iSaved != OI_OK)
 	{
+		LOG_WARNING("RoomMgr::Leave save room=%s code=%d", stRequest.sRoom.c_str(), iSaved);
 		co_return iSaved;
 	}
 	LOG_INFO("RoomMgr::Leave room=%s mac=%s src=%s:%u members=%zu version=%u", stRequest.sRoom.c_str(), stMac.Colon().c_str(), ::Lan::Ipv4::Text(iSourceIp).c_str(), iSourcePort, vPeers.size(), stAttr.iVersion);
@@ -204,21 +220,12 @@ void RoomMgr::Broadcast(const std::string& sRoom, const std::vector<sid_t>& vSes
 		LOG_WARNING("RoomMgr::Carry reject room=%s bytes=%zu", stCarry.sRoom.c_str(), stCarry.sFrame.size());
 		co_return OI_ERR_INVALID_ARGUMENT;
 	}
-	Room& stRoom = Take(stCarry.sRoom);
-	if (!stRoom.Ready())
+	std::shared_ptr<Room> pRoom = co_await Load(stCarry.sRoom);
+	if (!pRoom)
 	{
-		co_await stRoom.Occupy();
-		RoomBusy stBusy(stRoom);
-		if (!stRoom.Ready())
-		{
-			const int32_t iLoaded = co_await stRoom.Loaded(stCarry.sRoom);
-			if (iLoaded != OI_OK)
-			{
-				LOG_WARNING("RoomMgr::Carry load room=%s code=%d", stCarry.sRoom.c_str(), iLoaded);
-				co_return iLoaded;
-			}
-		}
+		co_return OI_ERR_FAIL;
 	}
+	Room& stRoom = *pRoom;
 	uint32_t iSourceIp = 0;
 	uint16_t iSourcePort = 0;
 	if (!stRoom.Claim(stMac, stContext.iSessionId, iSourceIp, iSourcePort))
@@ -246,4 +253,39 @@ void RoomMgr::Broadcast(const std::string& sRoom, const std::vector<sid_t>& vSes
 	const int64_t iEnd = ::OI::Timer::SteadyMilliseconds();
 	LOG_INFO("RoomMgr::Carry room=%s mac=%s dst=%s bytes=%zu targets=%zu code=%d begin=%lld end=%lld cost=%lldms", stCarry.sRoom.c_str(), stMac.Colon().c_str(), ::Lan::Ipv4::Text(stCarry.iVirtualIp).c_str(), stCarry.sFrame.size(), vSessions.size(), iRet, (long long)iBegin, (long long)iEnd, (long long)(iEnd - iBegin));
 	co_return iRet;
+}
+
+::OI::Coro::Task RoomMgr::Update()
+{
+	const time_t iCacheTtl = 30;
+	while (true)
+	{
+		co_await ::OI::Coro::yield(1000);
+		const time_t iNow = ::OI::Timer::GetTime();
+		std::vector<std::shared_ptr<Room>> vDrop;
+		for (auto itRoom = m_mRoom.begin(); itRoom != m_mRoom.end(); )
+		{
+			if (!itRoom->second->Idle(iNow, iCacheTtl))
+			{
+				++itRoom;
+				continue;
+			}
+			vDrop.push_back(itRoom->second);
+			itRoom = m_mRoom.erase(itRoom);
+		}
+		for (const std::shared_ptr<Room>& pRoom : vDrop)
+		{
+			if (!pRoom->Changed() || !pRoom->Ready())
+			{
+				continue;
+			}
+			const int32_t iSaved = co_await pRoom->Saved();
+			if (iSaved != OI_OK)
+			{
+				LOG_WARNING("RoomMgr::Update save room=%s code=%d", pRoom->Name().c_str(), iSaved);
+				m_mRoom.emplace(pRoom->Name(), pRoom);
+			}
+		}
+	}
+	co_return;
 }

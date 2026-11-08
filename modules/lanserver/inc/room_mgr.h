@@ -13,6 +13,7 @@
 #include "lan_addr.h"
 #include "room.h"
 #include <map>
+#include <memory>
 #include <time.h>
 #include <string>
 #include <vector>
@@ -22,10 +23,11 @@ class RoomMgr
 	DECLARE_SINGLETON(RoomMgr)
 	RoomMgr();
 
-	std::map<std::string, Room> m_mRoom;
+	std::map<std::string, std::shared_ptr<Room>> m_mRoom;
 	time_t m_iMemberTtl = 1;
 
-	Room& Take(const std::string& sRoom);
+	std::shared_ptr<Room> Take(const std::string& sRoom);
+	::OI::Coro::TaskResult<std::shared_ptr<Room>> Load(const std::string& sRoom);
 	void Broadcast(const std::string& sRoom, const std::vector<sid_t>& vSessions, const std::vector<::OI::RpcData::RoomPeer>& vPeers, const ::OI::RpcData::RoomAttr& stAttr);
 
   public:
@@ -36,4 +38,5 @@ class RoomMgr
 	::OI::Rpc::RpcTask Join(const ::OI::Rpc::RpcContext& stContext, const ::OI::RpcData::JoinReq& stRequest, ::OI::RpcData::JoinRes& stResponse);
 	::OI::Rpc::RpcTask Heartbeat(const ::OI::Rpc::RpcContext& stContext, const ::OI::RpcData::HeartbeatReq& stRequest, ::OI::RpcData::HeartbeatRes& stResponse);
 	::OI::Rpc::RpcTask Leave(const ::OI::Rpc::RpcContext& stContext, const ::OI::RpcData::LeaveReq& stRequest, ::OI::RpcData::LeaveRes& stResponse);
+	::OI::Coro::Task Update();
 };

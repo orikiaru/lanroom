@@ -2,6 +2,7 @@
 #include "oi_errno.h"
 #include "oi_log.h"
 #include "oi_redis_cmd.h"
+#include "oi_timer_helper.h"
 #include "rpc_enums.h"
 
 void Room::Remember(const ::Lan::MacAddress& stMac, uint32_t iSourceIp, uint16_t iSourcePort)
@@ -16,13 +17,17 @@ void Room::Remember(const ::Lan::MacAddress& stMac, uint32_t iSourceIp, uint16_t
 		if (stSlot.iSourceIp == iSourceIp)
 		{
 			stSlot.iSourcePort = iSourcePort;
+			stSlot.iSeen = ++m_iSeenSeq;
+			TouchAccess();
 			return;
 		}
 	}
 	SeenEndpoint stSlot;
 	stSlot.iSourceIp = iSourceIp;
 	stSlot.iSourcePort = iSourcePort;
+	stSlot.iSeen = ++m_iSeenSeq;
 	vSeen.push_back(stSlot);
+	TouchAccess();
 }
 
 bool Room::Claim(const ::Lan::MacAddress& stMac, sid_t iSessionId, uint32_t& iSourceIp, uint16_t& iSourcePort)
@@ -35,13 +40,17 @@ bool Room::Claim(const ::Lan::MacAddress& stMac, sid_t iSessionId, uint32_t& iSo
 	SeenEndpoint* pFree = NULL;
 	for (SeenEndpoint& stSlot : itSeen->second)
 	{
-		if (stSlot.iOwner == iSessionId && stSlot.iSourcePort != 0)
+		if (stSlot.iSourcePort == 0)
+		{
+			continue;
+		}
+		if (stSlot.iOwner == iSessionId)
 		{
 			iSourceIp = stSlot.iSourceIp;
 			iSourcePort = stSlot.iSourcePort;
 			return true;
 		}
-		if (stSlot.iOwner == 0 && stSlot.iSourcePort != 0 && pFree == NULL)
+		if (stSlot.iOwner == 0 && (pFree == NULL || stSlot.iSeen >= pFree->iSeen))
 		{
 			pFree = &stSlot;
 		}
@@ -53,6 +62,39 @@ bool Room::Claim(const ::Lan::MacAddress& stMac, sid_t iSessionId, uint32_t& iSo
 	pFree->iOwner = iSessionId;
 	iSourceIp = pFree->iSourceIp;
 	iSourcePort = pFree->iSourcePort;
+	return true;
+}
+
+bool Room::Replace(const ::Lan::MacAddress& stMac, sid_t iSessionId, uint32_t& iSourceIp, uint16_t& iSourcePort)
+{
+	if (Claim(stMac, iSessionId, iSourceIp, iSourcePort))
+	{
+		return true;
+	}
+	auto itSeen = m_mSeen.find(stMac.Bytes());
+	if (itSeen == m_mSeen.end())
+	{
+		return false;
+	}
+	SeenEndpoint* pLatest = NULL;
+	for (SeenEndpoint& stSlot : itSeen->second)
+	{
+		if (stSlot.iSourcePort == 0)
+		{
+			continue;
+		}
+		if (pLatest == NULL || stSlot.iSeen >= pLatest->iSeen)
+		{
+			pLatest = &stSlot;
+		}
+	}
+	if (pLatest == NULL)
+	{
+		return false;
+	}
+	pLatest->iOwner = iSessionId;
+	iSourceIp = pLatest->iSourceIp;
+	iSourcePort = pLatest->iSourcePort;
 	return true;
 }
 
@@ -241,6 +283,12 @@ void Room::WritePeers(std::vector<::OI::RpcData::RoomPeer>& vPeers) const
 void Room::Touch()
 {
 	m_stRecord.stAttr.iVersion += 1;
+	TouchAccess();
+}
+
+void Room::TouchAccess()
+{
+	m_iLastAccess = ::OI::Timer::GetTime();
 }
 
 void Room::AddSessions(const ::OI::RpcData::RoomMember& stMember, sid_t iExcept, std::vector<sid_t>& vSessions) const
@@ -314,12 +362,18 @@ void Room::ReleaseBusy()
 ::OI::Coro::TaskResult<int32_t> Room::Loaded(const std::string& sRoom)
 {
 	m_sRoom = sRoom;
+	TouchAccess();
+	if (m_bLoaded)
+	{
+		co_return OI_OK;
+	}
 	::OI::RpcData::RoomRecord stLoaded;
 	const int32_t iRet = co_await ::OI::Redis::RedisGet(m_sRoom, stLoaded);
 	if (iRet == OI_ERR_NOT_FOUND)
 	{
 		m_stRecord = ::OI::RpcData::RoomRecord();
 		m_bLoaded = true;
+		m_iLastSave = m_iLastAccess;
 		co_return OI_OK;
 	}
 	if (iRet != OI_OK)
@@ -328,6 +382,7 @@ void Room::ReleaseBusy()
 	}
 	m_stRecord = stLoaded;
 	m_bLoaded = true;
+	m_iLastSave = m_iLastAccess;
 	co_return OI_OK;
 }
 
@@ -336,20 +391,36 @@ bool Room::Ready() const
 	return m_bLoaded;
 }
 
+bool Room::Changed() const
+{
+	return m_iLastAccess > m_iLastSave;
+}
+
+bool Room::Idle(time_t iNow, time_t iTtl) const
+{
+	return m_iLastAccess == 0 || iNow - m_iLastAccess >= iTtl;
+}
+
 ::OI::Coro::TaskResult<int32_t> Room::Saved()
 {
 	if (m_stRecord.vMembers.empty())
 	{
 		const int32_t iRet = co_await ::OI::Redis::RedisDel(m_sRoom);
-		if (iRet == OI_ERR_NOT_FOUND)
+		if (iRet == OI_OK || iRet == OI_ERR_NOT_FOUND)
 		{
+			m_iLastSave = ::OI::Timer::GetTime();
 			co_return OI_OK;
 		}
 		co_return iRet;
 	}
 	m_stRecord.iRelayCount += m_iPendingRelay;
 	m_iPendingRelay = 0;
-	co_return co_await ::OI::Redis::RedisSet(m_sRoom, m_stRecord);
+	const int32_t iRet = co_await ::OI::Redis::RedisSet(m_sRoom, m_stRecord);
+	if (iRet == OI_OK)
+	{
+		m_iLastSave = ::OI::Timer::GetTime();
+	}
+	co_return iRet;
 }
 
 int32_t Room::Join(uint32_t iSourceIp, uint16_t iSourcePort, const ::Lan::MacAddress& stMac, bool bTcpRelay, time_t iNow, uint32_t& iVirtualIp, std::vector<::OI::RpcData::RoomPeer>& vPeers)
@@ -422,6 +493,7 @@ const ::OI::RpcData::RoomMember* Room::FindVirtual(uint32_t iVirtualIp) const
 void Room::CountRelay()
 {
 	m_iPendingRelay += 1;
+	TouchAccess();
 }
 
 uint8_t Room::TcpRelay() const
