@@ -217,11 +217,14 @@ bool RelaunchElevated()
 	{
 		LocalFree(vArgv);
 	}
+	wchar_t vDirectory[MAX_PATH];
+	GetCurrentDirectoryW(MAX_PATH, vDirectory);
 	SHELLEXECUTEINFOW stInfo = {};
 	stInfo.cbSize = sizeof(stInfo);
 	stInfo.fMask = SEE_MASK_NOCLOSEPROCESS;
 	stInfo.lpVerb = L"runas";
 	stInfo.lpFile = vPath;
+	stInfo.lpDirectory = vDirectory;
 	stInfo.lpParameters = sArgs.empty() ? NULL : sArgs.c_str();
 	stInfo.nShow = SW_SHOWNORMAL;
 	return ShellExecuteExW(&stInfo) == TRUE;

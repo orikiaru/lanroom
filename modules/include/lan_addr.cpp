@@ -160,4 +160,9 @@ std::string Ipv4::Text(uint32_t iAddress)
 	return vText;
 }
 
+bool Ipv4::ToAll(uint32_t iAddress)
+{
+	return iAddress == 0xFFFFFFFFu || (iAddress & 0xFFu) == 0xFFu || (iAddress >> 24) >= 224;
+}
+
 }

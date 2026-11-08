@@ -9,7 +9,6 @@
 #include "oi_rpcdata_leaveres.h"
 #include "oi_rpcdata_probereq.h"
 #include "oi_rpcdata_carryreq.h"
-#include "oi_rpcdata_relayreq.h"
 #include "oi_singleton.h"
 #include "lan_addr.h"
 #include "room.h"
@@ -32,7 +31,6 @@ class RoomMgr
   public:
 	void Init();
 	int32_t Probe(const ::OI::RpcData::ProbeReq& stProbe, uint32_t iSourceIp, uint16_t iSourcePort);
-	::OI::Rpc::RpcTask Relay(const ::OI::RpcData::RelayReq& stRelay, uint32_t iSourceIp, uint16_t iSourcePort);
 	::OI::Rpc::RpcTask Carry(const ::OI::Rpc::RpcContext& stContext, const ::OI::RpcData::CarryReq& stCarry);
 	void ReleaseSession(sid_t iSessionId);
 	::OI::Rpc::RpcTask Join(const ::OI::Rpc::RpcContext& stContext, const ::OI::RpcData::JoinReq& stRequest, ::OI::RpcData::JoinRes& stResponse);

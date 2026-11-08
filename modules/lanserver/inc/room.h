@@ -24,6 +24,9 @@ class Room
 	std::string m_sRoom;
 	::OI::RpcData::RoomRecord m_stRecord;
 	bool m_bBusy = false;
+	bool m_bLoaded = false;
+	// 转发不读写 Redis，计数先记在这里，下次 Saved 再并进记录。
+	uint32_t m_iPendingRelay = 0;
 	std::map<std::string, std::vector<SeenEndpoint>> m_mSeen;
 
 	bool SameUser(const ::OI::RpcData::RoomMember& stMember, uint32_t iSourceIp, const ::Lan::MacAddress& stMac) const;
@@ -32,6 +35,7 @@ class Room
 	void AdoptTcp(bool bRequested);
 	void Touch();
 	void WritePeers(std::vector<::OI::RpcData::RoomPeer>& vPeers) const;
+	void AddSessions(const ::OI::RpcData::RoomMember& stMember, sid_t iExcept, std::vector<sid_t>& vSessions) const;
 	static const size_t kMemberMax = 10;
 	bool HasUser(uint32_t iSourceIp, const ::Lan::MacAddress& stMac) const;
 	bool Upsert(uint32_t iSourceIp, uint16_t iSourcePort, const ::Lan::MacAddress& stMac, bool bSawPunch, time_t iNow);
@@ -45,6 +49,7 @@ class Room
 	::OI::Coro::TaskResult<int32_t> Occupy();
 	void ReleaseBusy();
 	::OI::Coro::TaskResult<int32_t> Loaded(const std::string& sRoom);
+	bool Ready() const;
 	::OI::Coro::TaskResult<int32_t> Saved();
 	int32_t Join(uint32_t iSourceIp, uint16_t iSourcePort, const ::Lan::MacAddress& stMac, bool bTcpRelay, time_t iNow, uint32_t& iVirtualIp, std::vector<::OI::RpcData::RoomPeer>& vPeers);
 	int32_t Update(uint32_t iSourceIp, uint16_t iSourcePort, const ::Lan::MacAddress& stMac, bool bSawPunch, time_t iNow, time_t iTtl, uint32_t& iVirtualIp, std::vector<::OI::RpcData::RoomPeer>& vPeers);
@@ -56,4 +61,6 @@ class Room
 	const std::string& Name() const;
 	void CopyPeers(std::vector<::OI::RpcData::RoomPeer>& vPeers) const;
 	void CollectSessions(sid_t iExcept, std::vector<sid_t>& vSessions) const;
+	// 单播只取目标成员的 TCP 会话；广播和组播取除发送者外所有人的。
+	void CollectTargets(sid_t iExcept, uint32_t iVirtualIp, std::vector<sid_t>& vSessions) const;
 };

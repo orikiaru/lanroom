@@ -36,21 +36,9 @@ bool RoomUdp::Source(sid_t iSessionId, uint32_t& iIp, uint16_t& iPort)
 	co_return RoomMgr::GetInstance().Probe(stRequest, iSourceIp, iSourcePort);
 }
 
-::OI::Rpc::RpcTask RoomUdp::HandleRelay(const ::OI::Rpc::RpcContext& stContext, const ::OI::RpcData::RelayReq& stRequest)
-{
-	uint32_t iSourceIp = 0;
-	uint16_t iSourcePort = 0;
-	if (!Source(stContext.iSessionId, iSourceIp, iSourcePort))
-	{
-		co_return OI_ERR_NOT_FOUND;
-	}
-	co_return co_await RoomMgr::GetInstance().Relay(stRequest, iSourceIp, iSourcePort);
-}
-
 bool RoomUdp::Init()
 {
 	OI_NOTIFY_BIND_SELF(Probe, RoomUdp, HandleProbe);
-	OI_NOTIFY_BIND_SELF(Relay, RoomUdp, HandleRelay);
 	return ::OI::Rpc::ProtoSessionManager::Init();
 }
 

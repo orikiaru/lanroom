@@ -243,36 +243,56 @@ void Room::Touch()
 	m_stRecord.stAttr.iVersion += 1;
 }
 
+void Room::AddSessions(const ::OI::RpcData::RoomMember& stMember, sid_t iExcept, std::vector<sid_t>& vSessions) const
+{
+	auto itSeen = m_mSeen.find(stMember.sMac);
+	if (itSeen == m_mSeen.end())
+	{
+		return;
+	}
+	for (const SeenEndpoint& stSlot : itSeen->second)
+	{
+		if (stSlot.iOwner == 0 || stSlot.iOwner == iExcept || stSlot.iSourceIp != stMember.iSourceIp)
+		{
+			continue;
+		}
+		bool bHave = false;
+		for (sid_t iSessionId : vSessions)
+		{
+			if (iSessionId == stSlot.iOwner)
+			{
+				bHave = true;
+				break;
+			}
+		}
+		if (!bHave)
+		{
+			vSessions.push_back(stSlot.iOwner);
+		}
+	}
+}
+
 void Room::CollectSessions(sid_t iExcept, std::vector<sid_t>& vSessions) const
 {
 	vSessions.clear();
 	for (const ::OI::RpcData::RoomMember& stMember : m_stRecord.vMembers)
 	{
-		auto itSeen = m_mSeen.find(stMember.sMac);
-		if (itSeen == m_mSeen.end())
-		{
-			continue;
-		}
-		for (const SeenEndpoint& stSlot : itSeen->second)
-		{
-			if (stSlot.iOwner == 0 || stSlot.iOwner == iExcept || stSlot.iSourceIp != stMember.iSourceIp)
-			{
-				continue;
-			}
-			bool bHave = false;
-			for (sid_t iSessionId : vSessions)
-			{
-				if (iSessionId == stSlot.iOwner)
-				{
-					bHave = true;
-					break;
-				}
-			}
-			if (!bHave)
-			{
-				vSessions.push_back(stSlot.iOwner);
-			}
-		}
+		AddSessions(stMember, iExcept, vSessions);
+	}
+}
+
+void Room::CollectTargets(sid_t iExcept, uint32_t iVirtualIp, std::vector<sid_t>& vSessions) const
+{
+	if (::Lan::Ipv4::ToAll(iVirtualIp))
+	{
+		CollectSessions(iExcept, vSessions);
+		return;
+	}
+	vSessions.clear();
+	const ::OI::RpcData::RoomMember* pTarget = FindVirtual(iVirtualIp);
+	if (pTarget != NULL)
+	{
+		AddSessions(*pTarget, iExcept, vSessions);
 	}
 }
 
@@ -280,7 +300,7 @@ void Room::CollectSessions(sid_t iExcept, std::vector<sid_t>& vSessions) const
 {
 	while (m_bBusy)
 	{
-		co_await ::OI::Coro::yield(1);
+		co_await ::OI::Coro::yield(5);
 	}
 	m_bBusy = true;
 	co_return OI_OK;
@@ -299,6 +319,7 @@ void Room::ReleaseBusy()
 	if (iRet == OI_ERR_NOT_FOUND)
 	{
 		m_stRecord = ::OI::RpcData::RoomRecord();
+		m_bLoaded = true;
 		co_return OI_OK;
 	}
 	if (iRet != OI_OK)
@@ -306,7 +327,13 @@ void Room::ReleaseBusy()
 		co_return iRet;
 	}
 	m_stRecord = stLoaded;
+	m_bLoaded = true;
 	co_return OI_OK;
+}
+
+bool Room::Ready() const
+{
+	return m_bLoaded;
 }
 
 ::OI::Coro::TaskResult<int32_t> Room::Saved()
@@ -320,6 +347,8 @@ void Room::ReleaseBusy()
 		}
 		co_return iRet;
 	}
+	m_stRecord.iRelayCount += m_iPendingRelay;
+	m_iPendingRelay = 0;
 	co_return co_await ::OI::Redis::RedisSet(m_sRoom, m_stRecord);
 }
 
@@ -392,7 +421,7 @@ const ::OI::RpcData::RoomMember* Room::FindVirtual(uint32_t iVirtualIp) const
 
 void Room::CountRelay()
 {
-	m_stRecord.iRelayCount += 1;
+	m_iPendingRelay += 1;
 }
 
 uint8_t Room::TcpRelay() const

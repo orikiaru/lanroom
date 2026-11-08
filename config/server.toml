@@ -2,7 +2,7 @@
 threadcount = 1
 
 [Timer]
-offset_ms = 50
+offset_ms = 5
 timer_lv_count = 4
 timer_lvs = [128, 128, 128, 1]
 

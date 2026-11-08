@@ -85,7 +85,7 @@ rpcdata PunchRes {
     0 string sMac;
 }
 
-// 一帧虚拟网卡数据。直连时客户端之间发，转发时服务器发给目标客户端。
+// 一帧虚拟网卡数据，打通后客户端之间直接发。
 rpcdata FrameReq {
     0 string sFrame;
 }
@@ -94,18 +94,8 @@ rpcdata FrameRes {
     0 string sFrame;
 }
 
-// 打不通时交给服务器，按虚拟地址转给房间里的成员。
-rpcdata RelayReq {
-    0 string sRoom;
-    1 uint32_t iVirtualIp;
-    2 string sFrame;
-}
-
-rpcdata RelayRes {
-    0 uint32_t iVirtualIp;
-}
-
-// 房间创建时勾了强制 TCP。客户端把帧从 TCP 送上来，服务器再按 UDP 转给对端。
+// 没打通，或房间创建时勾了强制 TCP，客户端把帧从 TCP 交给服务器，服务器按 iVirtualIp 沿 TCP 推给对端：
+// 成员地址只给这一个人，广播和组播地址给除发送者外的所有人。
 rpcdata CarryReq {
     0 string sRoom;
     1 string sMac;
@@ -137,7 +127,6 @@ rpc Heartbeat { id 4102; request HeartbeatReq; response HeartbeatRes; timeout 25
 rpc Leave { id 4109; request LeaveReq; response LeaveRes; timeout 25; }
 rpc Punch { id 4103; request PunchReq; response PunchRes; timeout 25; }
 rpc Frame { id 4104; request FrameReq; response FrameRes; timeout 25; }
-rpc Relay { id 4105; request RelayReq; response RelayRes; timeout 25; }
 rpc Probe { id 4106; request ProbeReq; response ProbeRes; timeout 25; }
 rpc Carry { id 4107; request CarryReq; response CarryRes; timeout 25; }
 rpc RoomCast { id 4108; request RoomCastReq; response RoomCastRes; timeout 25; }

@@ -1,13 +1,12 @@
 #include "room_mgr.h"
 #include "oi_config.h"
 #include "oi_coro.h"
+#include "oi_duration.h"
 #include "oi_errno.h"
 #include "oi_log.h"
-#include "oi_rpcdata_framereq.h"
 #include "oi_rpcdata_roomcastreq.h"
 #include "oi_timer_helper.h"
 #include "roomserver.h"
-#include "roomudp.h"
 #include "rpc_ids.h"
 
 struct RoomBusy
@@ -51,41 +50,6 @@ int32_t RoomMgr::Probe(const ::OI::RpcData::ProbeReq& stProbe, uint32_t iSourceI
 	}
 	Take(stProbe.sRoom).Remember(stMac, iSourceIp, iSourcePort);
 	return OI_OK;
-}
-
-::OI::Rpc::RpcTask RoomMgr::Relay(const ::OI::RpcData::RelayReq& stRelay, uint32_t iSourceIp, uint16_t iSourcePort)
-{
-	if (stRelay.sFrame.size() > ::Lan::kFrameMax || stRelay.sRoom.empty())
-	{
-		LOG_WARNING("RoomMgr::Relay reject room=%s src=%s:%u bytes=%zu", stRelay.sRoom.c_str(), ::Lan::Ipv4::Text(iSourceIp).c_str(), iSourcePort, stRelay.sFrame.size());
-		co_return OI_ERR_INVALID_ARGUMENT;
-	}
-	Room& stRoom = Take(stRelay.sRoom);
-	co_await stRoom.Occupy();
-	RoomBusy stBusy(stRoom);
-	const int32_t iLoaded = co_await stRoom.Loaded(stRelay.sRoom);
-	if (iLoaded != OI_OK)
-	{
-		LOG_WARNING("RoomMgr::Relay load room=%s code=%d", stRelay.sRoom.c_str(), iLoaded);
-		co_return iLoaded;
-	}
-	const ::OI::RpcData::RoomMember* pTarget = stRoom.FindVirtual(stRelay.iVirtualIp);
-	if (pTarget == NULL || (pTarget->iSourceIp == iSourceIp && pTarget->iSourcePort == iSourcePort))
-	{
-		LOG_WARNING("RoomMgr::Relay miss room=%s virt=%s src=%s:%u", stRelay.sRoom.c_str(), ::Lan::Ipv4::Text(stRelay.iVirtualIp).c_str(), ::Lan::Ipv4::Text(iSourceIp).c_str(), iSourcePort);
-		co_return OI_ERR_NOT_FOUND;
-	}
-	const uint32_t iTargetIp = pTarget->iSourceIp;
-	const uint16_t iTargetPort = pTarget->iSourcePort;
-	stRoom.CountRelay();
-	const int32_t iSaved = co_await stRoom.Saved();
-	if (iSaved != OI_OK)
-	{
-		co_return iSaved;
-	}
-	::OI::RpcData::FrameReq stFrame;
-	stFrame.sFrame = stRelay.sFrame;
-	co_return RoomUdp::GetInstance().Notify(iTargetIp, iTargetPort, stFrame);
 }
 
 ::OI::Rpc::RpcTask RoomMgr::Join(const ::OI::Rpc::RpcContext& stContext, const ::OI::RpcData::JoinReq& stRequest, ::OI::RpcData::JoinRes& stResponse)
@@ -233,6 +197,7 @@ void RoomMgr::Broadcast(const std::string& sRoom, const std::vector<sid_t>& vSes
 
 ::OI::Rpc::RpcTask RoomMgr::Carry(const ::OI::Rpc::RpcContext& stContext, const ::OI::RpcData::CarryReq& stCarry)
 {
+	const int64_t iBegin = ::OI::Timer::SteadyMilliseconds();
 	::Lan::MacAddress stMac;
 	if (!stMac.From(stCarry.sMac) || stCarry.sRoom.empty() || stCarry.sFrame.size() > ::Lan::kFrameMax)
 	{
@@ -240,8 +205,20 @@ void RoomMgr::Broadcast(const std::string& sRoom, const std::vector<sid_t>& vSes
 		co_return OI_ERR_INVALID_ARGUMENT;
 	}
 	Room& stRoom = Take(stCarry.sRoom);
-	co_await stRoom.Occupy();
-	RoomBusy stBusy(stRoom);
+	if (!stRoom.Ready())
+	{
+		co_await stRoom.Occupy();
+		RoomBusy stBusy(stRoom);
+		if (!stRoom.Ready())
+		{
+			const int32_t iLoaded = co_await stRoom.Loaded(stCarry.sRoom);
+			if (iLoaded != OI_OK)
+			{
+				LOG_WARNING("RoomMgr::Carry load room=%s code=%d", stCarry.sRoom.c_str(), iLoaded);
+				co_return iLoaded;
+			}
+		}
+	}
 	uint32_t iSourceIp = 0;
 	uint16_t iSourcePort = 0;
 	if (!stRoom.Claim(stMac, stContext.iSessionId, iSourceIp, iSourcePort))
@@ -249,32 +226,24 @@ void RoomMgr::Broadcast(const std::string& sRoom, const std::vector<sid_t>& vSes
 		LOG_WARNING("RoomMgr::Carry reject room=%s mac=%s sid=%d reason=no-probe", stCarry.sRoom.c_str(), stMac.Colon().c_str(), stContext.iSessionId);
 		co_return OI_ERR_NOT_FOUND;
 	}
-	const int32_t iLoaded = co_await stRoom.Loaded(stCarry.sRoom);
-	if (iLoaded != OI_OK)
-	{
-		LOG_WARNING("RoomMgr::Carry load room=%s code=%d", stCarry.sRoom.c_str(), iLoaded);
-		co_return iLoaded;
-	}
-	if (stRoom.TcpRelay() == 0)
-	{
-		LOG_WARNING("RoomMgr::Carry reject room=%s reason=not-tcp", stCarry.sRoom.c_str());
-		co_return OI_ERR_INVALID_ARGUMENT;
-	}
-	const ::OI::RpcData::RoomMember* pTarget = stRoom.FindVirtual(stCarry.iVirtualIp);
-	if (pTarget == NULL || (pTarget->iSourceIp == iSourceIp && pTarget->iSourcePort == iSourcePort))
+	std::vector<sid_t> vSessions;
+	stRoom.CollectTargets(stContext.iSessionId, stCarry.iVirtualIp, vSessions);
+	if (vSessions.empty())
 	{
 		LOG_WARNING("RoomMgr::Carry miss room=%s virt=%s src=%s:%u", stCarry.sRoom.c_str(), ::Lan::Ipv4::Text(stCarry.iVirtualIp).c_str(), ::Lan::Ipv4::Text(iSourceIp).c_str(), iSourcePort);
 		co_return OI_ERR_NOT_FOUND;
 	}
-	const uint32_t iTargetIp = pTarget->iSourceIp;
-	const uint16_t iTargetPort = pTarget->iSourcePort;
 	stRoom.CountRelay();
-	const int32_t iSaved = co_await stRoom.Saved();
-	if (iSaved != OI_OK)
+	int32_t iRet = OI_OK;
+	for (sid_t iSessionId : vSessions)
 	{
-		co_return iSaved;
+		const int32_t iSent = RoomServer::GetInstance().Notify(iSessionId, stCarry);
+		if (iSent != OI_OK)
+		{
+			iRet = iSent;
+		}
 	}
-	::OI::RpcData::FrameReq stFrame;
-	stFrame.sFrame = stCarry.sFrame;
-	co_return RoomUdp::GetInstance().Notify(iTargetIp, iTargetPort, stFrame);
+	const int64_t iEnd = ::OI::Timer::SteadyMilliseconds();
+	LOG_INFO("RoomMgr::Carry room=%s mac=%s dst=%s bytes=%zu targets=%zu code=%d begin=%lld end=%lld cost=%lldms", stCarry.sRoom.c_str(), stMac.Colon().c_str(), ::Lan::Ipv4::Text(stCarry.iVirtualIp).c_str(), stCarry.sFrame.size(), vSessions.size(), iRet, (long long)iBegin, (long long)iEnd, (long long)(iEnd - iBegin));
+	co_return iRet;
 }

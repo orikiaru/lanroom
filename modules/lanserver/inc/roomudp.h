@@ -3,7 +3,6 @@
 #include "oi_net.h"
 #include "oi_rpc_coro.h"
 #include "oi_rpcdata_probereq.h"
-#include "oi_rpcdata_relayreq.h"
 #include "oi_singleton.h"
 #include <string>
 
@@ -13,8 +12,6 @@ class RoomUdp : public ::OI::Rpc::ProtoSessionManager
 	RoomUdp();
 
 	::OI::Rpc::RpcTask HandleProbe(const ::OI::Rpc::RpcContext& stContext, const ::OI::RpcData::ProbeReq& stRequest);
-	::OI::Rpc::RpcTask HandleRelay(const ::OI::Rpc::RpcContext& stContext, const ::OI::RpcData::RelayReq& stRequest);
-
   public:
 	bool Init();
 	bool Source(sid_t iSessionId, uint32_t& iIp, uint16_t& iPort);

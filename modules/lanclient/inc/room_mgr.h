@@ -40,7 +40,6 @@ class RoomMgr
 	uint32_t m_iVirtualIp = 0;
 	std::vector<::OI::RpcData::RoomPeer> m_vPeers;
 	std::deque<std::vector<uint8_t>> m_vInbound;
-	std::deque<std::vector<uint8_t>> m_vOutbound;
 	std::atomic<bool> m_bRun;
 
 	const ::OI::RpcData::RoomPeer* OtherPeer() const;
@@ -51,7 +50,6 @@ class RoomMgr
 	void SendFrame(const std::vector<uint8_t>& vFrame);
 	void Punch();
 	::OI::Coro::Task Pump();
-
   public:
 	bool Prepare(const std::string& sRoom, const std::string& sMac, const std::string& sUdpServer, uint16_t iUdpPort, bool bDrop, bool bTcp);
 	bool Retarget(const std::string& sRoom, const std::string& sHost, uint16_t iPort, bool bTcp);
@@ -59,10 +57,12 @@ class RoomMgr
 	int32_t Punched(const ::OI::RpcData::PunchReq& stPunch, uint32_t iSourceIp, uint16_t iSourcePort);
 	int32_t Received(const ::OI::RpcData::FrameReq& stFrame, uint32_t iSourceIp, uint16_t iSourcePort);
 	void ApplyCast(const ::OI::RpcData::RoomCastReq& stCast);
+	int32_t Carried(const ::OI::RpcData::CarryReq& stCarry);
 	int32_t JoinCode() const;
 	void SetDrop(bool bDrop);
 	uint32_t VirtualIp();
 	void CopyPeers(std::vector<::OI::RpcData::RoomPeer>& vPeers);
+	// 网卡读线程和假网卡直接调，当场发出，不排队。
 	bool PushOutbound(const std::vector<uint8_t>& vFrame);
 	bool Read(sid_t iSessionId, std::vector<uint8_t>& vFrame);
 	bool ExpireRead(sid_t iSessionId);

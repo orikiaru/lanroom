@@ -23,7 +23,7 @@ port	= "19995"
 type   	= "tcp"
 
 [Timer]
-offset_ms = 50		#定时器间隔,必须被1000整除
+offset_ms = 5		#定时器间隔,必须被1000整除
 timer_lv_count = 4	#定时器分割等级数,必须>=2
 #每一个偏移等级对应的tick数基数
 #lv[0] = timer_lvs[0]

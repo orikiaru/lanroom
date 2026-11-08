@@ -2,6 +2,7 @@
 #include "oi_errno.h"
 #include "oi_net.h"
 #include "oi_rpc_coro.h"
+#include "oi_rpcdata_carryreq.h"
 #include "oi_rpcdata_roomcastreq.h"
 #include "oi_singleton.h"
 
@@ -29,6 +30,7 @@ class RoomClient : public OI::Rpc::ProtoClientManager
 
   private:
 	::OI::Rpc::RpcTask HandleRoomCast(const ::OI::Rpc::RpcContext& stContext, const ::OI::RpcData::RoomCastReq& stRequest);
+	::OI::Rpc::RpcTask HandleCarry(const ::OI::Rpc::RpcContext& stContext, const ::OI::RpcData::CarryReq& stRequest);
 	virtual void OnClientConnect(OI::Net::Session* pSession);
 	virtual void OnClientDisconnect(const OI::Net::Session* pSession);
 	virtual void OnConnectFailed();

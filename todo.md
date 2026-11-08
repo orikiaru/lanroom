@@ -24,10 +24,10 @@
 - [x] 给房间内成员分配不同的虚拟地址，同在一个子网。
 - [x] 成员心跳。停报后从这一个 key 里摘掉，并把对端从直连退回转发。
 - [x] 进房和心跳走生成出来的 TCP RPC。客户端另开一条 UDP，先发 `Probe` 给服务器让服务器看到来源地址。
-- [x] 拿到对端地址后，在同一个 UDP 口上按对端地址开会话，打洞包和直连帧发给它。发送优先直连，直连不可用就 `Relay` 给服务器。
-- [x] UDP 改用框架的 UDP 通道。服务器和客户端各有一个 `RoomUdp`，只把 `Probe`、`Punch`、`Frame`、`Relay` 转给 `RoomMgr`。转发的帧由 `RoomMgr` 调 `RoomUdp` 发出。`RoomClient::Init` 启动房间循环，和 `IpcClient` 启动 `UdpMgr` 一样。假网卡的会话管理器是 `NicMgr`，会话是 `NicSession`。MAC 和 IPv4 文本在 `modules/include/lan_addr.h`。去掉了 `share` 里的通道、基类和手工拆包。
+- [x] 拿到对端地址后，在同一个 UDP 口上按对端地址开会话，打洞包和直连帧发给它。发送优先直连，直连不可用就经 TCP `Carry` 交给服务器，服务器沿 TCP 推给对端。房间创建时勾了强制 TCP 就一直走 `Carry`。
+- [x] UDP 改用框架的 UDP 通道。服务器和客户端各有一个 `RoomUdp`，只把 `Probe`、`Punch`、`Frame` 转给 `RoomMgr`。`RoomClient::Init` 启动房间循环，和 `IpcClient` 启动 `UdpMgr` 一样。假网卡的会话管理器是 `NicMgr`，会话是 `NicSession`。MAC 和 IPv4 文本在 `modules/include/lan_addr.h`。去掉了 `share` 里的通道、基类和手工拆包。
 - [x] 心跳过期差一：`member_ttl` 按整秒算，原来 `now - 上次心跳 < ttl` 在跨秒时把刚报过心跳的成员摘掉。改成超过 ttl 才摘。
-- [ ] 客户端多线程下，同一会话的两条单向消息是否按到达顺序处理，框架文档没写。用例 19 目前都过，但要框架给出保证或客户端自己按序号排。
+- [x] 客户端多线程下，同一会话的两条单向消息是否按到达顺序处理，框架文档没写。隧道里装的是 UDP 包，应用本来就要能接受乱序，这里不做保证，也不加序号。
 - [x] 假网卡：`NicMgr` 管 TCP 会话，`NicSession` 在 `OnDataIn` 拆行协议。`READ` 没帧就挂 2 秒定时器，帧到了由 `RoomMgr` 经 `NicMgr` 写回这条会话。
 - [x] 打洞结果写回房间记录。两边都收到对端打洞包才算直连。
 - [x] 帧转发。直连时帧不经过服务器。超时未直连时，服务器按房间记录转给另一个成员。
@@ -36,7 +36,7 @@
 - [x] 进房和心跳的失败用 RPC 返回码。`OI_OK` 成功，参数不对是 `OI_ERR_INVALID_ARGUMENT`，还没看到 UDP 是 `OI_ERR_NOT_FOUND`，其余沿用框架码。回包只带虚拟地址和对端。
 - [x] 真虚拟网卡。Windows 用 Wintun，Linux 用 TUN，名字都是 lanroom。网卡读到的 IP 包进 RoomMgr 发出，收到的包写回网卡。分配到虚拟地址后设成 /24，MTU 跟单包上限一样。创建网卡要管理员权限。假网卡仍只给 `run_cases.py`。
 - [x] Windows 界面。不带 `--room` 时用系统自带的 WebView2 打开页面，填写房间、服务器和端口，加入后显示未加入、正在加入、还没有别人、直连或服务器转发。
-- [ ] 公网服务器是 `120.48.43.244`，进程在 `/home/jiangxueyang/lanroom`，TCP `17001`、UDP `17000`，Redis 只听本机 `6379`。云安全组还没放行这两个口，本机连 `17001` 失败。放行后本机开两个客户端进同一房间，验证直连和服务器转发。界面默认连这台。
+- [x] 公网服务器是 `120.48.43.244`，进程在 `/home/jiangxueyang/lanroom`，TCP `17001`、UDP `17000`，Redis 只听本机 `6379`。安全组已放行，本机两个客户端进同一房间能经服务器 TCP 中转互通，远程机器上的客户端也和本机互通过。界面默认连这台。
 
 ## 测试用例
 

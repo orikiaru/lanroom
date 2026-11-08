@@ -23,9 +23,16 @@ const std::string RoomClient::GetIDString()
 	co_return OI_OK;
 }
 
+::OI::Rpc::RpcTask RoomClient::HandleCarry(const ::OI::Rpc::RpcContext& stContext, const ::OI::RpcData::CarryReq& stRequest)
+{
+	(void)stContext;
+	co_return RoomMgr::GetInstance().Carried(stRequest);
+}
+
 bool RoomClient::Init()
 {
 	OI_NOTIFY_BIND_SELF(RoomCast, RoomClient, HandleRoomCast);
+	OI_NOTIFY_BIND_SELF(Carry, RoomClient, HandleCarry);
 	if (!::OI::Rpc::ProtoClientManager::Init())
 	{
 		return false;

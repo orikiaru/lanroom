@@ -1,0 +1,20 @@
+[Service]
+name = "logd"
+id = 1
+
+[Log]
+root_path = "/home/jiangxueyang/logs"
+max_pending_bytes = 67108864
+
+[ThreadPool]
+threadcount = 2
+
+[Timer]
+offset_ms = 50
+timer_lv_count = 4
+timer_lvs = [128, 128, 128, 1]
+
+[LogServer]
+ip = "127.0.0.1"
+port = "19995"
+type = "tcp"

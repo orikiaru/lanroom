@@ -455,6 +455,25 @@ def case_forward():
     stayed = after is not None and after["tcp"] == 1 and all(item["direct"] == 0 for item in after["members"])
     check("21 tcp room carries the frame", before is not None and before["tcp"] == 1 and got == b"tcp-frame" and stayed and after["relay"] > before["relay"])
     cleanup(nf, ng, f, g)
+    redis_call("DEL", "tcpcast")
+    h, nh = start_client("tcpcast", "02:00:00:00:00:61", 18161, "127.0.0.1", tcp=True)
+    i, ni = start_client("tcpcast", "02:00:00:00:00:62", 18162, "127.0.0.2")
+    j, nj = start_client("tcpcast", "02:00:00:00:00:63", 18163, "127.0.0.3")
+    room = wait_members("tcpcast", 3)
+    time.sleep(0.8)
+    virt = {item["mac"]: item["virtual"] for item in (room["members"] if room else [])}
+    target = virt.get(bytes.fromhex("020000000062"), 0)
+    unicast = bytes([0x45]) + b"\x00" * 15 + target.to_bytes(4, "big") + b"to-62"
+    nh.write(unicast)
+    time.sleep(0.5)
+    hit = ni.read()
+    stray = nj.read()
+    check("22 tcp unicast reaches only the target", target != 0 and hit == unicast and stray is None)
+    spread = bytes([0x45]) + b"\x00" * 15 + bytes([255, 255, 255, 255]) + b"to-all"
+    nh.write(spread)
+    time.sleep(0.5)
+    check("23 tcp broadcast reaches everyone else", ni.read() == spread and nj.read() == spread)
+    cleanup(nh, ni, nj, h, i, j)
 
 
 def case_frames():

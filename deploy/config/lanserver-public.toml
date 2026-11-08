@@ -1,8 +1,18 @@
+[Service]
+name = "lanserver"
+id = 1
+
 [ThreadPool]
 threadcount = 1
 
+# 日志发给本机 logd，落到用户目录的 logs 下。
+[LogClient]
+ip = "127.0.0.1"
+port = "19995"
+type = "tcp"
+
 [Timer]
-offset_ms = 50
+offset_ms = 5
 timer_lv_count = 4
 timer_lvs = [128, 128, 128, 1]
 

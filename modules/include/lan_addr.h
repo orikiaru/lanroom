@@ -27,6 +27,8 @@ class Ipv4
 {
   public:
 	static std::string Text(uint32_t iAddress);
+	// 255.255.255.255、/24 子网广播和组播，要发给房间里的其他所有人。
+	static bool ToAll(uint32_t iAddress);
 };
 
 }
