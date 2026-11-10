@@ -1,5 +1,5 @@
 CompileFlags:
-  CompilationDatabase: build-clangd
+  CompilationDatabase: build-clangd-win
   Compiler: clang-cl
   Add:
     - -std=c++20

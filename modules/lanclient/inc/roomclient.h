@@ -1,5 +1,4 @@
 #pragma once
-#include "oi_errno.h"
 #include "oi_net.h"
 #include "oi_rpc_coro.h"
 #include "oi_rpcdata_carryreq.h"
@@ -16,16 +15,6 @@ class RoomClient : public OI::Rpc::ProtoClientManager
 	virtual ~RoomClient();
 	bool Init();
 	void UseHost(const std::string& sHost);
-	template <typename Msg>
-	int32_t Notify(const Msg& stMessage)
-	{
-		sid_t iSessionId = ConnectedSid();
-		if (iSessionId == INVALID_SID)
-		{
-			return OI_ERR_CONNECT;
-		}
-		return ::OI::Rpc::RpcNotify(*this, iSessionId, stMessage);
-	}
 	virtual const std::string GetIDString();
 
   private:

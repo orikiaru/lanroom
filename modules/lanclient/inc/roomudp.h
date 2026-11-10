@@ -18,15 +18,9 @@ class RoomUdp : public ::OI::Rpc::ProtoSessionManager
   public:
 	bool Init(const std::string& sBind);
 	bool Source(sid_t iSessionId, uint32_t& iIp, uint16_t& iPort);
-	template <typename Msg>
-	int32_t Notify(uint32_t iIp, uint16_t iPort, const Msg& stMessage)
+	sid_t Peer(uint32_t iIp, uint16_t iPort)
 	{
-		sid_t iSessionId = OpenPeer(::Lan::Ipv4::Text(iIp), std::to_string(iPort));
-		if (iSessionId == INVALID_SID)
-		{
-			return OI_ERR_CONNECT;
-		}
-		return ::OI::Rpc::RpcNotify(*this, iSessionId, stMessage);
+		return OpenPeer(::Lan::Ipv4::Text(iIp), std::to_string(iPort));
 	}
 	virtual const std::string GetIDString();
 

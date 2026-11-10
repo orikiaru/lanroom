@@ -180,7 +180,8 @@ void RoomMgr::Probe()
 		::OI::Thread::MutexGuard stLock(m_stStateLock);
 		stProbe.iSawPunch = m_bSawPunch ? 1 : 0;
 	}
-	RoomUdp::GetInstance().Notify(m_iServerIp, m_iServerPort, stProbe);
+	RoomUdp& stUdp = RoomUdp::GetInstance();
+	stUdp.Notify(stUdp.Peer(m_iServerIp, m_iServerPort), stProbe);
 }
 
 void RoomMgr::SendFrame(const std::vector<uint8_t>& vFrame)
@@ -253,7 +254,8 @@ void RoomMgr::SendFrame(const std::vector<uint8_t>& vFrame)
 			sVia = "udp";
 			::OI::RpcData::FrameReq stFrame;
 			stFrame.sFrame.assign((const char*)vFrame.data(), vFrame.size());
-			iCode = RoomUdp::GetInstance().Notify(stTarget.iPeerIp, stTarget.iPeerPort, stFrame);
+			RoomUdp& stUdp = RoomUdp::GetInstance();
+			iCode = stUdp.Notify(stUdp.Peer(stTarget.iPeerIp, stTarget.iPeerPort), stFrame);
 		}
 		else
 		{
@@ -262,7 +264,8 @@ void RoomMgr::SendFrame(const std::vector<uint8_t>& vFrame)
 			stCarry.sMac = sSelf;
 			stCarry.iVirtualIp = stTarget.iVirtualIp;
 			stCarry.sFrame.assign((const char*)vFrame.data(), vFrame.size());
-			iCode = RoomClient::GetInstance().Notify(stCarry);
+			RoomClient& stClient = RoomClient::GetInstance();
+			iCode = stClient.Notify(stClient.ConnectedSid(), stCarry);
 		}
 		const int64_t iEnd = ::OI::Timer::SteadyMilliseconds();
 		LOG_INFO("RoomMgr::Forward dir=out via=%s room=%s bytes=%zu dst=%s code=%d begin=%lld end=%lld cost=%lldms", sVia, sRoom.c_str(), vFrame.size(), ::Lan::Ipv4::Text(stTarget.iVirtualIp).c_str(), iCode, (long long)iBegin, (long long)iEnd, (long long)(iEnd - iBegin));
@@ -285,7 +288,8 @@ void RoomMgr::Punch()
 	}
 	::OI::RpcData::PunchReq stPunch;
 	stPunch.sMac = m_stMac.Bytes();
-	RoomUdp::GetInstance().Notify(iPeerIp, iPeerPort, stPunch);
+	RoomUdp& stUdp = RoomUdp::GetInstance();
+	stUdp.Notify(stUdp.Peer(iPeerIp, iPeerPort), stPunch);
 }
 
 ::OI::Coro::Task RoomMgr::Pump()
