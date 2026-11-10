@@ -264,7 +264,7 @@ void RoomMgr::SendFrame(const std::vector<uint8_t>& vFrame)
 			stCarry.sMac = sSelf;
 			stCarry.iVirtualIp = stTarget.iVirtualIp;
 			stCarry.sFrame.assign((const char*)vFrame.data(), vFrame.size());
-			iCode = RoomClient::GetInstance().NotifyPeer(0, stCarry);
+			iCode = RoomClient::GetInstance().NotifyAny(stCarry);
 		}
 		const int64_t iEnd = ::OI::Timer::SteadyMilliseconds();
 		LOG_INFO("RoomMgr::Forward dir=out via=%s room=%s bytes=%zu dst=%s code=%d begin=%lld end=%lld cost=%lldms", sVia, sRoom.c_str(), vFrame.size(), ::Lan::Ipv4::Text(stTarget.iVirtualIp).c_str(), iCode, (long long)iBegin, (long long)iEnd, (long long)(iEnd - iBegin));
@@ -323,7 +323,7 @@ void RoomMgr::Punch()
 			stRequest.sRoom = sLeaveRoom;
 			stRequest.sMac = sMac;
 			::OI::RpcData::LeaveRes stResponse;
-			const int32_t iRet = co_await RoomClient::GetInstance().Call(0, stRequest, stResponse, ::OI::Timer::Seconds(3));
+			const int32_t iRet = co_await RoomClient::GetInstance().CallAny(stRequest, stResponse, ::OI::Timer::Seconds(3));
 			::OI::Thread::MutexGuard stLock(m_stStateLock);
 			if (m_iAttempt == iAttempt)
 			{
@@ -344,7 +344,7 @@ void RoomMgr::Punch()
 			stRequest.sMac = sMac;
 			stRequest.stAttr.iTcpRelay = bTcpAsk ? 1 : 0;
 			::OI::RpcData::JoinRes stResponse;
-			const int32_t iRet = co_await RoomClient::GetInstance().Call(0, stRequest, stResponse, ::OI::Timer::Seconds(3));
+			const int32_t iRet = co_await RoomClient::GetInstance().CallAny(stRequest, stResponse, ::OI::Timer::Seconds(3));
 			{
 				::OI::Thread::MutexGuard stLock(m_stStateLock);
 				if (m_iAttempt != iAttempt)
@@ -369,7 +369,7 @@ void RoomMgr::Punch()
 			stRequest.sMac = sMac;
 			stRequest.iSawPunch = bSaw ? 1 : 0;
 			::OI::RpcData::HeartbeatRes stResponse;
-			const int32_t iRet = co_await RoomClient::GetInstance().Call(0, stRequest, stResponse, ::OI::Timer::Seconds(3));
+			const int32_t iRet = co_await RoomClient::GetInstance().CallAny(stRequest, stResponse, ::OI::Timer::Seconds(3));
 			if (iRet == OI_OK)
 			{
 				KeepSnapshot(stResponse.iVirtualIp, stResponse.vPeers, stResponse.stAttr);
