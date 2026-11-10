@@ -98,7 +98,7 @@ int main(int iArgumentCount, char* vArguments[])
 		return 1;
 	}
 	RoomClient::GetInstance().UseHost(sServer);
-	RoomClient::GetInstance().StartClient();
+	RoomClient::GetInstance().Start();
 	iCode = ::OI::Base::RunFramework();
 	RoomMgr::GetInstance().Stop();
 	return iCode;

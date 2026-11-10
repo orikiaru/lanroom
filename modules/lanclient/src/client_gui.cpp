@@ -356,7 +356,7 @@ int ClientGui::Run(const char* pConfig, const std::string& sServer, int iPort, c
 						    else
 						    {
 							    RoomClient::GetInstance().UseHost(sHost);
-							    RoomClient::GetInstance().StartClient();
+							    RoomClient::GetInstance().Start();
 							    bJoined.store(true);
 						    }
 					    }

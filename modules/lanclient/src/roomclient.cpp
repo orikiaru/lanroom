@@ -1,5 +1,4 @@
 #include "roomclient.h"
-#include "oi_socket.h"
 #include "room_mgr.h"
 #include "rpc_ids.h"
 
@@ -33,7 +32,7 @@ bool RoomClient::Init()
 {
 	OI_NOTIFY_BIND_SELF(RoomCast, RoomClient, HandleRoomCast);
 	OI_NOTIFY_BIND_SELF(Carry, RoomClient, HandleCarry);
-	if (!::OI::Rpc::ProtoClientManager::Init())
+	if (!::OI::Rpc::ProtoMultiClientManager::Init())
 	{
 		return false;
 	}
@@ -47,26 +46,5 @@ void RoomClient::UseHost(const std::string& sHost)
 	{
 		return;
 	}
-	DefaultInit(sHost, GetStrPort(), GetSessionType());
-	sEndpoint = ::OI::Net::NetAddr::Endpoint(sHost, GetStrPort());
-}
-
-void RoomClient::OnClientConnect(OI::Net::Session* pSession)
-{
-	(void)pSession;
-}
-
-void RoomClient::OnClientDisconnect(const OI::Net::Session* pSession)
-{
-	(void)pSession;
-}
-
-void RoomClient::OnConnectFailed()
-{
-	if (!AutoReconnect() || bServiceDown || sEndpoint.empty())
-	{
-		FailHeldCalls();
-		return;
-	}
-	Reconnect(1000);
+	UseAddress(sHost, GetStrPort());
 }
