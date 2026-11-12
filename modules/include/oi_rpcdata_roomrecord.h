@@ -2,9 +2,6 @@
 #include "oi_rpc.h"
 #include "oi_rpcdata_roommember.h"
 #include "oi_rpcdata_roomattr.h"
-#include "oi_json.h"
-#include <memory>
-#include <string>
 
 namespace OI { namespace RpcData {
 class RoomRecord : public ::OI::Rpc::RpcData
@@ -46,41 +43,6 @@ public:
             }
         }
         return os;
-    }
-    bool FromJson(const Json::Value& in)
-    {
-        if (!in.isObject()) return false;
-        RoomRecord decoded(*this);
-        if (in.isMember("iRelayCount") && !::OI::Rpc::FromJsonValue(in["iRelayCount"], decoded.iRelayCount)) return false;
-        if (in.isMember("vMembers") && !::OI::Rpc::FromJsonValue(in["vMembers"], decoded.vMembers)) return false;
-        if (in.isMember("stAttr") && !::OI::Rpc::FromJsonValue(in["stAttr"], decoded.stAttr)) return false;
-        *this = std::move(decoded);
-        return true;
-    }
-    bool FromJson(const std::string& text)
-    {
-        Json::CharReaderBuilder builder;
-        Json::Value root;
-        std::string errs;
-        const std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
-        const char* begin = text.data();
-        if (!reader->parse(begin, begin + text.size(), &root, &errs)) return false;
-        return FromJson(root);
-    }
-    void ToJson(Json::Value& out) const
-    {
-        out = Json::Value(Json::objectValue);
-        ::OI::Rpc::ToJsonValue(out["iRelayCount"], iRelayCount);
-        ::OI::Rpc::ToJsonValue(out["vMembers"], vMembers);
-        ::OI::Rpc::ToJsonValue(out["stAttr"], stAttr);
-    }
-    std::string ToJson() const
-    {
-        Json::Value out;
-        ToJson(out);
-        Json::StreamWriterBuilder builder;
-        builder["indentation"] = "";
-        return Json::writeString(builder, out);
     }
 };
 }}

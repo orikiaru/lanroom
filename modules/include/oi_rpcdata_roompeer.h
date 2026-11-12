@@ -1,8 +1,5 @@
 #pragma once
 #include "oi_rpc.h"
-#include "oi_json.h"
-#include <memory>
-#include <string>
 
 namespace OI { namespace RpcData {
 class RoomPeer : public ::OI::Rpc::RpcData
@@ -51,45 +48,6 @@ public:
             }
         }
         return os;
-    }
-    bool FromJson(const Json::Value& in)
-    {
-        if (!in.isObject()) return false;
-        RoomPeer decoded(*this);
-        if (in.isMember("sMac") && !::OI::Rpc::FromJsonValue(in["sMac"], decoded.sMac)) return false;
-        if (in.isMember("iSourceIp") && !::OI::Rpc::FromJsonValue(in["iSourceIp"], decoded.iSourceIp)) return false;
-        if (in.isMember("iSourcePort") && !::OI::Rpc::FromJsonValue(in["iSourcePort"], decoded.iSourcePort)) return false;
-        if (in.isMember("iVirtualIp") && !::OI::Rpc::FromJsonValue(in["iVirtualIp"], decoded.iVirtualIp)) return false;
-        if (in.isMember("iDirect") && !::OI::Rpc::FromJsonValue(in["iDirect"], decoded.iDirect)) return false;
-        *this = std::move(decoded);
-        return true;
-    }
-    bool FromJson(const std::string& text)
-    {
-        Json::CharReaderBuilder builder;
-        Json::Value root;
-        std::string errs;
-        const std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
-        const char* begin = text.data();
-        if (!reader->parse(begin, begin + text.size(), &root, &errs)) return false;
-        return FromJson(root);
-    }
-    void ToJson(Json::Value& out) const
-    {
-        out = Json::Value(Json::objectValue);
-        ::OI::Rpc::ToJsonValue(out["sMac"], sMac);
-        ::OI::Rpc::ToJsonValue(out["iSourceIp"], iSourceIp);
-        ::OI::Rpc::ToJsonValue(out["iSourcePort"], iSourcePort);
-        ::OI::Rpc::ToJsonValue(out["iVirtualIp"], iVirtualIp);
-        ::OI::Rpc::ToJsonValue(out["iDirect"], iDirect);
-    }
-    std::string ToJson() const
-    {
-        Json::Value out;
-        ToJson(out);
-        Json::StreamWriterBuilder builder;
-        builder["indentation"] = "";
-        return Json::writeString(builder, out);
     }
 };
 }}

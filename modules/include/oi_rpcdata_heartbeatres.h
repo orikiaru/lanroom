@@ -2,9 +2,6 @@
 #include "oi_rpc.h"
 #include "oi_rpcdata_roompeer.h"
 #include "oi_rpcdata_roomattr.h"
-#include "oi_json.h"
-#include <memory>
-#include <string>
 
 namespace OI { namespace RpcData {
 class HeartbeatRes : public ::OI::Rpc::RpcData
@@ -46,41 +43,6 @@ public:
             }
         }
         return os;
-    }
-    bool FromJson(const Json::Value& in)
-    {
-        if (!in.isObject()) return false;
-        HeartbeatRes decoded(*this);
-        if (in.isMember("iVirtualIp") && !::OI::Rpc::FromJsonValue(in["iVirtualIp"], decoded.iVirtualIp)) return false;
-        if (in.isMember("vPeers") && !::OI::Rpc::FromJsonValue(in["vPeers"], decoded.vPeers)) return false;
-        if (in.isMember("stAttr") && !::OI::Rpc::FromJsonValue(in["stAttr"], decoded.stAttr)) return false;
-        *this = std::move(decoded);
-        return true;
-    }
-    bool FromJson(const std::string& text)
-    {
-        Json::CharReaderBuilder builder;
-        Json::Value root;
-        std::string errs;
-        const std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
-        const char* begin = text.data();
-        if (!reader->parse(begin, begin + text.size(), &root, &errs)) return false;
-        return FromJson(root);
-    }
-    void ToJson(Json::Value& out) const
-    {
-        out = Json::Value(Json::objectValue);
-        ::OI::Rpc::ToJsonValue(out["iVirtualIp"], iVirtualIp);
-        ::OI::Rpc::ToJsonValue(out["vPeers"], vPeers);
-        ::OI::Rpc::ToJsonValue(out["stAttr"], stAttr);
-    }
-    std::string ToJson() const
-    {
-        Json::Value out;
-        ToJson(out);
-        Json::StreamWriterBuilder builder;
-        builder["indentation"] = "";
-        return Json::writeString(builder, out);
     }
 };
 }}

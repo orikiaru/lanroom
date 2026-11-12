@@ -264,7 +264,9 @@ void RoomMgr::SendFrame(const std::vector<uint8_t>& vFrame)
 			stCarry.sMac = sSelf;
 			stCarry.iVirtualIp = stTarget.iVirtualIp;
 			stCarry.sFrame.assign((const char*)vFrame.data(), vFrame.size());
-			iCode = RoomClient::GetInstance().NotifyAny(stCarry);
+			RoomClient& stClient = RoomClient::GetInstance();
+			const sid_t iSessionId = stClient.ConnectedAny();
+			iCode = iSessionId == INVALID_SID ? OI_ERR_CONNECT : stClient.Notify(iSessionId, stCarry);
 		}
 		const int64_t iEnd = ::OI::Timer::SteadyMilliseconds();
 		LOG_INFO("RoomMgr::Forward dir=out via=%s room=%s bytes=%zu dst=%s code=%d begin=%lld end=%lld cost=%lldms", sVia, sRoom.c_str(), vFrame.size(), ::Lan::Ipv4::Text(stTarget.iVirtualIp).c_str(), iCode, (long long)iBegin, (long long)iEnd, (long long)(iEnd - iBegin));
