@@ -17,12 +17,11 @@ include_directories(${CMAKE_SOURCE_DIR}/modules/include)
 set(LAN_PROTO_CONFIG ${CMAKE_SOURCE_DIR}/protoconfig)
 set(LAN_PROTO_FILES ${LAN_PROTO_CONFIG}/rpc.proto)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-	${LAN_PROTO_FILES} ${LAN_PROTO_CONFIG}/module.proto ${LAN_PROTO_CONFIG}/component.proto)
+	${LAN_PROTO_FILES} ${LAN_PROTO_CONFIG}/module.proto)
 
 execute_process(
 	COMMAND ${PYTHON_BIN} ${PROTO_TOOL_DIR}/main.py
 		${LAN_PROTO_CONFIG}/module.proto
-		${LAN_PROTO_CONFIG}/component.proto
 		${CMAKE_SOURCE_DIR}/modules/include
 		${CMAKE_SOURCE_DIR}/modules
 		${CMAKE_SOURCE_DIR}/deploy

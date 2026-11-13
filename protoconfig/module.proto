@@ -1,9 +1,7 @@
-// 一个 module 是一个进程。目录名是模块名的小写。component 引用 component.proto。
+// 一个 module 是一个进程。目录名是模块名的小写。
 
 module LanServer {
-    component RoomServer;
 }
 
 module LanClient {
-    component RoomClient;
 }
