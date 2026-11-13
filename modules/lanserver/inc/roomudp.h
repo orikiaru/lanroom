@@ -13,11 +13,16 @@ class RoomUdp : public ::OI::Rpc::ProtoSessionManager
 
 	::OI::Rpc::RpcTask HandleProbe(const ::OI::Rpc::RpcContext& stContext, const ::OI::RpcData::ProbeReq& stRequest);
   public:
-	bool Init();
+	int32_t Init() override;
 	bool Source(sid_t iSessionId, uint32_t& iIp, uint16_t& iPort);
 	sid_t Peer(uint32_t iIp, uint16_t iPort)
 	{
-		return OpenPeer(::Lan::Ipv4::Text(iIp), std::to_string(iPort));
+		sid_t iSessionId = INVALID_SID;
+		if (OpenPeer(::Lan::Ipv4::Text(iIp), std::to_string(iPort), iSessionId) != OI_OK)
+		{
+			return INVALID_SID;
+		}
+		return iSessionId;
 	}
 	virtual const std::string GetIDString();
 

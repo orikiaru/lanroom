@@ -245,7 +245,7 @@ int ClientGui::Run(const char* pConfig, const std::string& sServer, int iPort, c
 	{
 		return iCode;
 	}
-	if (!::OI::Log::Init())
+	if (::OI::Log::Init() != OI_OK)
 	{
 		::OI::Log::InitLocal(NULL);
 	}
@@ -333,6 +333,7 @@ int ClientGui::Run(const char* pConfig, const std::string& sServer, int iPort, c
 						    std::string sHost = stArgs[1].asString();
 						    int iJoinPort = atoi(stArgs[2].asString().c_str());
 						    bool bTcp = stArgs.size() >= 4 && stArgs[3].asString() == "1";
+						    int32_t iInitCode = OI_OK;
 						    if (sMac.empty())
 						    {
 							    sResult = "读不到上网网卡的 MAC";
@@ -345,13 +346,13 @@ int ClientGui::Run(const char* pConfig, const std::string& sServer, int iPort, c
 						    {
 							    sResult = "房间名不能为空";
 						    }
-						    else if (!RoomUdp::GetInstance().Init(sBindLocal) || !RoomUdp::GetInstance().StartServer())
+						    else if ((iInitCode = RoomUdp::GetInstance().Init(sBindLocal)) != OI_OK || (iInitCode = RoomUdp::GetInstance().StartServer()) != OI_OK)
 						    {
-							    sResult = "UDP 绑定失败";
+							    sResult = "UDP 绑定失败 code=" + std::to_string(iInitCode);
 						    }
-						    else if (!RoomClient::GetInstance().Init())
+						    else if ((iInitCode = RoomClient::GetInstance().Init()) != OI_OK)
 						    {
-							    sResult = "连接初始化失败";
+							    sResult = "连接初始化失败 code=" + std::to_string(iInitCode);
 						    }
 						    else
 						    {

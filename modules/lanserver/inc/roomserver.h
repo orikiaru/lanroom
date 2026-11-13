@@ -22,7 +22,7 @@ class RoomServer : public OI::Rpc::ProtoSessionManager
 
   public:
 	virtual ~RoomServer();
-	bool Init();
+	int32_t Init() override;
 	virtual const std::string GetIDString();
 
   private:

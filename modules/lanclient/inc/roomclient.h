@@ -13,7 +13,7 @@ class RoomClient : public OI::Rpc::ProtoMultiClientManager
 
   public:
 	virtual ~RoomClient();
-	bool Init() override;
+	int32_t Init() override;
 	void UseHost(const std::string& sHost);
 	const std::string GetIDString() override;
 

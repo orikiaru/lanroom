@@ -35,7 +35,7 @@ const std::string RoomServer::GetIDString()
 	co_return co_await RoomMgr::GetInstance().Carry(stContext, stRequest);
 }
 
-bool RoomServer::Init()
+int32_t RoomServer::Init()
 {
 	RoomMgr::GetInstance().Init();
 	OI_RPC_BIND_SELF(Join, RoomServer, HandleJoin);

@@ -19,24 +19,24 @@ int main(int iArgumentCount, char* vArguments[])
 	{
 		return iCode;
 	}
-	if (!::OI::Log::Init())
+	if (::OI::Log::Init() != OI_OK)
 	{
 		::OI::Log::InitLocal(NULL);
 	}
-	if (!::OI::Redis::RedisClient::GetInstance().Init())
+	if ((iCode = ::OI::Redis::RedisClient::GetInstance().Init()) != OI_OK)
 	{
-		fprintf(stderr, "redis client init failed\n");
+		fprintf(stderr, "redis client init failed code=%d\n", iCode);
 		return 1;
 	}
 	::OI::Redis::RedisClient::GetInstance().StartClient();
-	if (!RoomServer::GetInstance().Init() || !RoomServer::GetInstance().StartServer())
+	if ((iCode = RoomServer::GetInstance().Init()) != OI_OK || (iCode = RoomServer::GetInstance().StartServer()) != OI_OK)
 	{
-		fprintf(stderr, "room rpc listen failed\n");
+		fprintf(stderr, "room rpc listen failed code=%d\n", iCode);
 		return 1;
 	}
-	if (!RoomUdp::GetInstance().Init() || !RoomUdp::GetInstance().StartServer())
+	if ((iCode = RoomUdp::GetInstance().Init()) != OI_OK || (iCode = RoomUdp::GetInstance().StartServer()) != OI_OK)
 	{
-		fprintf(stderr, "udp bind failed\n");
+		fprintf(stderr, "udp bind failed code=%d\n", iCode);
 		return 1;
 	}
 	std::string sIp;

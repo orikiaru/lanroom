@@ -81,21 +81,31 @@ def decode_room(blob):
                 if field == 0 and len(value) == 1:
                     tcp = value[0]
         elif seq == 1:
-            member = {"mac": b"", "ip": 0, "port": 0, "virtual": 0, "direct": 0, "saw": 0}
-            for field, value in pb_fields(data):
-                if field == 0:
-                    member["mac"] = value
-                elif field == 1 and len(value) == 4:
-                    member["ip"] = int.from_bytes(value, "little")
-                elif field == 2 and len(value) == 2:
-                    member["port"] = int.from_bytes(value, "little")
-                elif field == 3 and len(value) == 4:
-                    member["virtual"] = int.from_bytes(value, "little")
-                elif field == 4 and len(value) == 1:
-                    member["direct"] = value[0]
-                elif field == 5 and len(value) == 1:
-                    member["saw"] = value[0]
-            members.append(member)
+            count = struct.unpack_from("<I", data, 0)[0]
+            offset = 4
+            for _ in range(count):
+                size = struct.unpack_from("<I", data, offset)[0]
+                offset += 4
+                if offset + size > len(data):
+                    raise ValueError("truncated room member")
+                member = {"mac": b"", "ip": 0, "port": 0, "virtual": 0, "direct": 0, "saw": 0}
+                for field, value in pb_fields(data[offset:offset + size]):
+                    if field == 0:
+                        member["mac"] = value
+                    elif field == 1 and len(value) == 4:
+                        member["ip"] = int.from_bytes(value, "little")
+                    elif field == 2 and len(value) == 2:
+                        member["port"] = int.from_bytes(value, "little")
+                    elif field == 3 and len(value) == 4:
+                        member["virtual"] = int.from_bytes(value, "little")
+                    elif field == 4 and len(value) == 1:
+                        member["direct"] = value[0]
+                    elif field == 5 and len(value) == 1:
+                        member["saw"] = value[0]
+                members.append(member)
+                offset += size
+            if offset != len(data):
+                raise ValueError("trailing room members data")
     return {"relay": relay, "tcp": tcp, "members": members}
 
 

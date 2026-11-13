@@ -32,22 +32,15 @@ public:
     }
     virtual ::OI::Base::BytesStream& deserialize(::OI::Base::BytesStream& os)
     {
-        while (os.RemainSize() > 0)
-        {
-            uint32_t field_seq = 0;
-            uint32_t field_size = 0;
-            os.ReadPbHeader(field_seq, field_size);
-            switch (field_seq)
-            {
-            case 0: os.ReadPb(field_size, sMac); break;
-            case 1: os.ReadPb(field_size, iSourceIp); break;
-            case 2: os.ReadPb(field_size, iSourcePort); break;
-            case 3: os.ReadPb(field_size, iVirtualIp); break;
-            case 4: os.ReadPb(field_size, iDirect); break;
-            default: os.SkipPb(field_size); break;
-            }
-        }
-        return os;
+        static constexpr std::array<::OI::Base::PbField, 5> fields = {{
+            OI_PB_FIELD(RoomPeer, 0, sMac),
+            OI_PB_FIELD(RoomPeer, 1, iSourceIp),
+            OI_PB_FIELD(RoomPeer, 2, iSourcePort),
+            OI_PB_FIELD(RoomPeer, 3, iVirtualIp),
+            OI_PB_FIELD(RoomPeer, 4, iDirect),
+        }};
+        std::array<uint8_t, 5> seen{};
+        return os.ReadFields(this, fields, seen);
     }
 };
 }}

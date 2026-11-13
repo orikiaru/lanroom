@@ -20,18 +20,11 @@ public:
     }
     virtual ::OI::Base::BytesStream& deserialize(::OI::Base::BytesStream& os)
     {
-        while (os.RemainSize() > 0)
-        {
-            uint32_t field_seq = 0;
-            uint32_t field_size = 0;
-            os.ReadPbHeader(field_seq, field_size);
-            switch (field_seq)
-            {
-            case 0: os.ReadPb(field_size, sMac); break;
-            default: os.SkipPb(field_size); break;
-            }
-        }
-        return os;
+        static constexpr std::array<::OI::Base::PbField, 1> fields = {{
+            OI_PB_FIELD(ProbeRes, 0, sMac),
+        }};
+        std::array<uint8_t, 1> seen{};
+        return os.ReadFields(this, fields, seen);
     }
 };
 }}

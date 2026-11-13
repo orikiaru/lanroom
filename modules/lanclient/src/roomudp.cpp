@@ -15,7 +15,7 @@ const std::string RoomUdp::GetIDString()
 bool RoomUdp::Source(sid_t iSessionId, uint32_t& iIp, uint16_t& iPort)
 {
 	::OI::Net::NetAddr stAddr;
-	if (!GetPeerAddr(iSessionId, stAddr) || stAddr.Family() != AF_INET)
+	if (GetPeerAddr(iSessionId, stAddr) != OI_OK || stAddr.Family() != AF_INET)
 	{
 		return false;
 	}
@@ -47,16 +47,17 @@ bool RoomUdp::Source(sid_t iSessionId, uint32_t& iIp, uint16_t& iPort)
 	co_return RoomMgr::GetInstance().Received(stRequest, iSourceIp, iSourcePort);
 }
 
-bool RoomUdp::Init(const std::string& sBind)
+int32_t RoomUdp::Init(const std::string& sBind)
 {
 	OI_NOTIFY_BIND_SELF(Punch, RoomUdp, HandlePunch);
 	OI_NOTIFY_BIND_SELF(Frame, RoomUdp, HandleFrame);
-	if (!::OI::Rpc::ProtoSessionManager::Init())
+	int32_t iCode = ::OI::Rpc::ProtoSessionManager::Init();
+	if (iCode != OI_OK)
 	{
-		return false;
+		return iCode;
 	}
 	DefaultInit(sBind, "0", ::OI::Net::SESSION_TYPE_UDP);
-	return true;
+	return OI_OK;
 }
 
 void RoomUdp::OnAddSession(::OI::Net::Session* pSession)
