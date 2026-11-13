@@ -401,7 +401,7 @@ bool Room::Idle(time_t iNow, time_t iTtl) const
 	return m_iLastAccess == 0 || iNow - m_iLastAccess >= iTtl;
 }
 
-::OI::Coro::TaskResult<int32_t> Room::Saved()
+::OI::Coro::TaskResult<int32_t> Room::Saved(::OI::Timer::MS stTimeToLive)
 {
 	if (m_stRecord.vMembers.empty())
 	{
@@ -415,7 +415,7 @@ bool Room::Idle(time_t iNow, time_t iTtl) const
 	}
 	m_stRecord.iRelayCount += m_iPendingRelay;
 	m_iPendingRelay = 0;
-	const int32_t iRet = co_await ::OI::Redis::RedisSet(m_sRoom, m_stRecord);
+	const int32_t iRet = co_await ::OI::Redis::RedisSet(m_sRoom, m_stRecord, stTimeToLive);
 	if (iRet == OI_OK)
 	{
 		m_iLastSave = ::OI::Timer::GetTime();

@@ -58,7 +58,7 @@ class Room
 	bool Ready() const;
 	bool Changed() const;
 	bool Idle(time_t iNow, time_t iTtl) const;
-	::OI::Coro::TaskResult<int32_t> Saved();
+	::OI::Coro::TaskResult<int32_t> Saved(::OI::Timer::MS stTimeToLive);
 	int32_t Join(uint32_t iSourceIp, uint16_t iSourcePort, const ::Lan::MacAddress& stMac, bool bTcpRelay, time_t iNow, uint32_t& iVirtualIp, std::vector<::OI::RpcData::RoomPeer>& vPeers);
 	int32_t Update(uint32_t iSourceIp, uint16_t iSourcePort, const ::Lan::MacAddress& stMac, bool bSawPunch, time_t iNow, time_t iTtl, uint32_t& iVirtualIp, std::vector<::OI::RpcData::RoomPeer>& vPeers);
 	bool Remove(uint32_t iSourceIp, const ::Lan::MacAddress& stMac);
