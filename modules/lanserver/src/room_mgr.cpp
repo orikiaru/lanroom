@@ -103,7 +103,7 @@ int32_t RoomMgr::Probe(const ::OI::RpcData::ProbeReq& stProbe, uint32_t iSourceI
 	::OI::RpcData::RoomAttr stAttr = stRoom.Attr();
 	stRoom.CollectSessions(stContext.iSessionId, vSessions);
 	stRoom.CopyPeers(vPeers);
-	const int32_t iSaved = co_await stRoom.Saved();
+	const int32_t iSaved = co_await stRoom.Saved(::OI::Timer::Seconds(m_iMemberTtl));
 	if (iSaved != OI_OK)
 	{
 		LOG_WARNING("RoomMgr::Join save room=%s code=%d", stRequest.sRoom.c_str(), iSaved);
@@ -141,7 +141,7 @@ int32_t RoomMgr::Probe(const ::OI::RpcData::ProbeReq& stProbe, uint32_t iSourceI
 		co_return iUpdated;
 	}
 	stResponse.stAttr = stRoom.Attr();
-	const int32_t iSaved = co_await stRoom.Saved();
+	const int32_t iSaved = co_await stRoom.Saved(::OI::Timer::Seconds(m_iMemberTtl));
 	if (iSaved != OI_OK)
 	{
 		LOG_WARNING("RoomMgr::Heartbeat save room=%s code=%d", stRequest.sRoom.c_str(), iSaved);
@@ -183,7 +183,7 @@ int32_t RoomMgr::Probe(const ::OI::RpcData::ProbeReq& stProbe, uint32_t iSourceI
 	::OI::RpcData::RoomAttr stAttr = stRoom.Attr();
 	stRoom.CollectSessions(stContext.iSessionId, vSessions);
 	stRoom.CopyPeers(vPeers);
-	const int32_t iSaved = co_await stRoom.Saved();
+	const int32_t iSaved = co_await stRoom.Saved(::OI::Timer::Seconds(m_iMemberTtl));
 	if (iSaved != OI_OK)
 	{
 		LOG_WARNING("RoomMgr::Leave save room=%s code=%d", stRequest.sRoom.c_str(), iSaved);
@@ -279,7 +279,7 @@ void RoomMgr::Broadcast(const std::string& sRoom, const std::vector<sid_t>& vSes
 			{
 				continue;
 			}
-			const int32_t iSaved = co_await pRoom->Saved();
+			const int32_t iSaved = co_await pRoom->Saved(::OI::Timer::Seconds(m_iMemberTtl));
 			if (iSaved != OI_OK)
 			{
 				LOG_WARNING("RoomMgr::Update save room=%s code=%d", pRoom->Name().c_str(), iSaved);

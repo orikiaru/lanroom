@@ -27,7 +27,7 @@ int RunClientWindow(const char* pConfig, const std::string& sServer, int iPort, 
 	{
 		return iCode;
 	}
-	if (!::OI::Log::Init())
+	if (::OI::Log::Init() != OI_OK)
 	{
 		::OI::Log::InitLocal(NULL);
 	}
@@ -113,30 +113,31 @@ int RunClientWindow(const char* pConfig, const std::string& sServer, int iPort, 
 					    }
 					    else
 					    {
-						    std::string sRoom = stArgs[0].asString();
-						    std::string sHost = stArgs[1].asString();
-						    int iJoinPort = atoi(stArgs[2].asString().c_str());
-						    bool bTcp = stArgs.size() >= 4 && stArgs[3].asString() == "1";
-						    if (sMac.empty())
-						    {
-							    sResult = "读不到上网网卡的 MAC";
-						    }
-						    else if (iJoinPort <= 0 || iJoinPort > 65535)
-						    {
-							    sResult = "端口不对";
-						    }
-						    else if (!RoomMgr::GetInstance().Prepare(sRoom, sMac, sHost, (uint16_t)iJoinPort, false, bTcp))
-						    {
-							    sResult = "房间名不能为空";
-						    }
-						    else if (!RoomUdp::GetInstance().Init(sBindLocal) || !RoomUdp::GetInstance().StartServer())
-						    {
-							    sResult = "UDP 绑定失败";
-						    }
-						    else if (!RoomClient::GetInstance().Init())
-						    {
-							    sResult = "连接初始化失败";
-						    }
+						std::string sRoom = stArgs[0].asString();
+						std::string sHost = stArgs[1].asString();
+						int iJoinPort = atoi(stArgs[2].asString().c_str());
+						bool bTcp = stArgs.size() >= 4 && stArgs[3].asString() == "1";
+						int32_t iInitCode = OI_OK;
+						if (sMac.empty())
+						{
+							sResult = "读不到上网网卡的 MAC";
+						}
+						else if (iJoinPort <= 0 || iJoinPort > 65535)
+						{
+							sResult = "端口不对";
+						}
+						else if (!RoomMgr::GetInstance().Prepare(sRoom, sMac, sHost, (uint16_t)iJoinPort, false, bTcp))
+						{
+							sResult = "房间名不能为空";
+						}
+						else if ((iInitCode = RoomUdp::GetInstance().Init(sBindLocal)) != OI_OK || (iInitCode = RoomUdp::GetInstance().StartServer()) != OI_OK)
+						{
+							sResult = "UDP 绑定失败 code=" + std::to_string(iInitCode);
+						}
+						else if ((iInitCode = RoomClient::GetInstance().Init()) != OI_OK)
+						{
+							sResult = "连接初始化失败 code=" + std::to_string(iInitCode);
+						}
 						    else
 						    {
 							    RoomClient::GetInstance().UseHost(sHost);

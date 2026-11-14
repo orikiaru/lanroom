@@ -28,16 +28,17 @@ const std::string RoomClient::GetIDString()
 	co_return RoomMgr::GetInstance().Carried(stRequest);
 }
 
-bool RoomClient::Init()
+int32_t RoomClient::Init()
 {
 	OI_NOTIFY_BIND_SELF(RoomCast, RoomClient, HandleRoomCast);
 	OI_NOTIFY_BIND_SELF(Carry, RoomClient, HandleCarry);
-	if (!::OI::Rpc::ProtoMultiClientManager::Init())
+	int32_t iCode = ::OI::Rpc::ProtoMultiClientManager::Init();
+	if (iCode != OI_OK)
 	{
-		return false;
+		return iCode;
 	}
 	RoomMgr::GetInstance().Start();
-	return true;
+	return OI_OK;
 }
 
 void RoomClient::UseHost(const std::string& sHost)

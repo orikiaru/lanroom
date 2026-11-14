@@ -28,21 +28,13 @@ public:
     }
     virtual ::OI::Base::BytesStream& deserialize(::OI::Base::BytesStream& os)
     {
-        vPeers.clear();
-        while (os.RemainSize() > 0)
-        {
-            uint32_t field_seq = 0;
-            uint32_t field_size = 0;
-            os.ReadPbHeader(field_seq, field_size);
-            switch (field_seq)
-            {
-            case 0: os.ReadPb(field_size, sRoom); break;
-            case 1: os.ReadPb(field_size, vPeers); break;
-            case 2: os.ReadPb(field_size, stAttr); break;
-            default: os.SkipPb(field_size); break;
-            }
-        }
-        return os;
+        static constexpr std::array<::OI::Base::PbField, 3> fields = {{
+            OI_PB_FIELD(RoomCastReq, 0, sRoom),
+            OI_PB_FIELD(RoomCastReq, 1, vPeers),
+            OI_PB_FIELD(RoomCastReq, 2, stAttr),
+        }};
+        std::array<uint8_t, 3> seen{};
+        return os.ReadFields(this, fields, seen);
     }
 };
 }}

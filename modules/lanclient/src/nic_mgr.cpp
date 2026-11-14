@@ -19,7 +19,7 @@ bool NicMgr::Listen(uint16_t iPort)
 		return false;
 	}
 	DefaultInit("127.0.0.1", std::to_string(iPort), ::OI::Net::SESSION_TYPE_TCP);
-	if (!StartServer())
+	if (StartServer() != OI_OK)
 	{
 		return false;
 	}

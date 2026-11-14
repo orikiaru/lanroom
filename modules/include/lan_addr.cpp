@@ -203,7 +203,7 @@ bool MacAddress::FromUplink()
 		if (iDestination == 0 && iMask == 0 && (iFlags & 1u) != 0 && iMetric <= iBestMetric)
 		{
 			iBestMetric = iMetric;
-			strncpy(vBest, vName, IFNAMSIZ - 1);
+			snprintf(vBest, sizeof(vBest), "%s", vName);
 		}
 	}
 	fclose(pRoute);
@@ -218,7 +218,7 @@ bool MacAddress::FromUplink()
 	}
 	ifreq stRequest;
 	memset(&stRequest, 0, sizeof(stRequest));
-	strncpy(stRequest.ifr_name, vBest, IFNAMSIZ - 1);
+	snprintf(stRequest.ifr_name, sizeof(stRequest.ifr_name), "%s", vBest);
 	if (ioctl(iSocket, SIOCGIFHWADDR, &stRequest) != 0)
 	{
 		close(iSocket);

@@ -15,7 +15,7 @@ const std::string RoomUdp::GetIDString()
 bool RoomUdp::Source(sid_t iSessionId, uint32_t& iIp, uint16_t& iPort)
 {
 	::OI::Net::NetAddr stAddr;
-	if (!GetPeerAddr(iSessionId, stAddr) || stAddr.Family() != AF_INET)
+	if (GetPeerAddr(iSessionId, stAddr) != OI_OK || stAddr.Family() != AF_INET)
 	{
 		return false;
 	}
@@ -36,7 +36,7 @@ bool RoomUdp::Source(sid_t iSessionId, uint32_t& iIp, uint16_t& iPort)
 	co_return RoomMgr::GetInstance().Probe(stRequest, iSourceIp, iSourcePort);
 }
 
-bool RoomUdp::Init()
+int32_t RoomUdp::Init()
 {
 	OI_NOTIFY_BIND_SELF(Probe, RoomUdp, HandleProbe);
 	return ::OI::Rpc::ProtoSessionManager::Init();

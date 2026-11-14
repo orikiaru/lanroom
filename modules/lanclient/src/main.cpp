@@ -76,7 +76,7 @@ int main(int iArgumentCount, char* vArguments[])
 	{
 		return iCode;
 	}
-	if (!::OI::Log::Init())
+	if (::OI::Log::Init() != OI_OK)
 	{
 		::OI::Log::InitLocal(NULL);
 	}
@@ -85,16 +85,16 @@ int main(int iArgumentCount, char* vArguments[])
 		fprintf(stderr, "usage: lanroom-client --room name --mac aa:bb:cc:dd:ee:ff --nic-port N [--bind ip] [--server ip] [--server-port N]\n");
 		return 2;
 	}
-	if (!RoomUdp::GetInstance().Init(sBind) || !RoomUdp::GetInstance().StartServer())
+	if ((iCode = RoomUdp::GetInstance().Init(sBind)) != OI_OK || (iCode = RoomUdp::GetInstance().StartServer()) != OI_OK)
 	{
-		fprintf(stderr, "udp bind failed\n");
+		fprintf(stderr, "udp bind failed code=%d\n", iCode);
 		return 1;
 	}
 	printf("lanroom client port %u\n", RoomUdp::GetInstance().LocalPort());
 	fflush(stdout);
-	if (!RoomClient::GetInstance().Init())
+	if ((iCode = RoomClient::GetInstance().Init()) != OI_OK)
 	{
-		fprintf(stderr, "RoomClient Init error\n");
+		fprintf(stderr, "RoomClient Init error code=%d\n", iCode);
 		return 1;
 	}
 	RoomClient::GetInstance().UseHost(sServer);
