@@ -235,7 +235,9 @@ bool TunMgr::Write(const std::vector<uint8_t>& vFrame)
 #include <arpa/inet.h>
 #include <errno.h>
 #include <net/if.h>
+#include <net/if_dl.h>
 #include <net/if_utun.h>
+#include <net/route.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <string.h>
@@ -349,33 +351,74 @@ void TunMgr::ApplyAddress()
 	{
 		return;
 	}
-	ifreq stRequest;
-	memset(&stRequest, 0, sizeof(stRequest));
-	strncpy(stRequest.ifr_name, g_sIfName, IFNAMSIZ - 1);
-	sockaddr_in* pAddress = (sockaddr_in*)&stRequest.ifr_addr;
-	pAddress->sin_len = sizeof(*pAddress);
-	pAddress->sin_family = AF_INET;
-	pAddress->sin_addr.s_addr = htonl(iAddress);
-	if (ioctl(iSocket, SIOCSIFADDR, &stRequest) != 0)
+	// utun 是点对点口。分开设地址时内核按 A 类留下 /8，SIOCSIFNETMASK 也不改掩码。
+	// 和 ifconfig 一样，用一条 SIOCAIFADDR 同时写入本机地址、对端和 /24。
+	ifaliasreq stAlias;
+	memset(&stAlias, 0, sizeof(stAlias));
+	strncpy(stAlias.ifra_name, g_sIfName, IFNAMSIZ - 1);
+	auto fnFill = [](sockaddr_in* pAddress, uint32_t iValue)
+	{
+		pAddress->sin_len = sizeof(*pAddress);
+		pAddress->sin_family = AF_INET;
+		pAddress->sin_addr.s_addr = htonl(iValue);
+	};
+	fnFill((sockaddr_in*)&stAlias.ifra_addr, iAddress);
+	fnFill((sockaddr_in*)&stAlias.ifra_broadaddr, iAddress);
+	fnFill((sockaddr_in*)&stAlias.ifra_mask, 0xFFFFFF00u);
+	if (ioctl(iSocket, SIOCAIFADDR, &stAlias) != 0)
 	{
 		close(iSocket);
 		return;
 	}
-	memset(&stRequest, 0, sizeof(stRequest));
-	strncpy(stRequest.ifr_name, g_sIfName, IFNAMSIZ - 1);
-	pAddress = (sockaddr_in*)&stRequest.ifr_addr;
-	pAddress->sin_len = sizeof(*pAddress);
-	pAddress->sin_family = AF_INET;
-	pAddress->sin_addr.s_addr = htonl(0xFFFFFF00u);
-	ioctl(iSocket, SIOCSIFNETMASK, &stRequest);
-	memset(&stRequest, 0, sizeof(stRequest));
-	strncpy(stRequest.ifr_name, g_sIfName, IFNAMSIZ - 1);
-	if (ioctl(iSocket, SIOCGIFFLAGS, &stRequest) == 0)
+	ifreq stFlags;
+	memset(&stFlags, 0, sizeof(stFlags));
+	strncpy(stFlags.ifr_name, g_sIfName, IFNAMSIZ - 1);
+	if (ioctl(iSocket, SIOCGIFFLAGS, &stFlags) == 0)
 	{
-		stRequest.ifr_flags |= IFF_UP | IFF_RUNNING;
-		ioctl(iSocket, SIOCSIFFLAGS, &stRequest);
+		stFlags.ifr_flags |= IFF_UP | IFF_RUNNING;
+		ioctl(iSocket, SIOCSIFFLAGS, &stFlags);
 	}
 	close(iSocket);
+	int iRoute = socket(PF_ROUTE, SOCK_RAW, AF_INET);
+	if (iRoute >= 0)
+	{
+		auto fnPut = [](std::vector<uint8_t>& vMessage, const void* pAddress, uint8_t iLength)
+		{
+			const uint8_t iRounded = (uint8_t)((iLength + 3) & ~3);
+			const size_t iAt = vMessage.size();
+			vMessage.resize(iAt + iRounded, 0);
+			memcpy(vMessage.data() + iAt, pAddress, iLength);
+		};
+		sockaddr_in stDest;
+		memset(&stDest, 0, sizeof(stDest));
+		stDest.sin_len = sizeof(stDest);
+		stDest.sin_family = AF_INET;
+		stDest.sin_addr.s_addr = htonl(iAddress & 0xFFFFFF00u);
+		sockaddr_dl stGate;
+		memset(&stGate, 0, sizeof(stGate));
+		stGate.sdl_len = sizeof(stGate);
+		stGate.sdl_family = AF_LINK;
+		stGate.sdl_index = (u_short)if_nametoindex(g_sIfName);
+		sockaddr_in stMask;
+		memset(&stMask, 0, sizeof(stMask));
+		stMask.sin_len = sizeof(stMask);
+		stMask.sin_family = AF_INET;
+		stMask.sin_addr.s_addr = htonl(0xFFFFFF00u);
+		std::vector<uint8_t> vMessage(sizeof(rt_msghdr), 0);
+		fnPut(vMessage, &stDest, stDest.sin_len);
+		fnPut(vMessage, &stGate, stGate.sdl_len);
+		fnPut(vMessage, &stMask, stMask.sin_len);
+		rt_msghdr* pHeader = (rt_msghdr*)vMessage.data();
+		pHeader->rtm_msglen = (u_short)vMessage.size();
+		pHeader->rtm_version = RTM_VERSION;
+		pHeader->rtm_type = RTM_ADD;
+		pHeader->rtm_flags = RTF_UP | RTF_STATIC;
+		pHeader->rtm_addrs = RTA_DST | RTA_GATEWAY | RTA_NETMASK;
+		pHeader->rtm_pid = getpid();
+		pHeader->rtm_seq = 1;
+		write(iRoute, vMessage.data(), vMessage.size());
+		close(iRoute);
+	}
 	m_iAddress = iAddress;
 	m_sStatus = std::string(g_sIfName) + " " + ::Lan::Ipv4::Text(iAddress) + "/24";
 }
