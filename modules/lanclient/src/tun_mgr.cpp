@@ -231,7 +231,212 @@ bool TunMgr::Write(const std::vector<uint8_t>& vFrame)
 	return true;
 }
 
-#else
+#elif defined(__APPLE__)
+#include <arpa/inet.h>
+#include <errno.h>
+#include <net/if.h>
+#include <net/if_utun.h>
+#include <netinet/in.h>
+#include <poll.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <sys/kern_control.h>
+#include <sys/socket.h>
+#include <sys/sys_domain.h>
+#include <unistd.h>
+#include <vector>
+
+namespace
+{
+int g_iFd = -1;
+char g_sIfName[IFNAMSIZ];
+std::mutex g_stWriteLock;
+std::atomic<bool> g_bRun{false};
+std::thread g_stRead;
+}
+
+TunMgr::TunMgr()
+{
+}
+
+bool TunMgr::Open()
+{
+	memset(g_sIfName, 0, sizeof(g_sIfName));
+	g_iFd = socket(PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);
+	if (g_iFd < 0)
+	{
+		m_sStatus = errno == EPERM ? "创建虚拟网卡需要管理员权限" : "创建虚拟网卡失败";
+		return false;
+	}
+	ctl_info stInfo;
+	memset(&stInfo, 0, sizeof(stInfo));
+	strncpy(stInfo.ctl_name, UTUN_CONTROL_NAME, sizeof(stInfo.ctl_name) - 1);
+	if (ioctl(g_iFd, CTLIOCGINFO, &stInfo) != 0)
+	{
+		close(g_iFd);
+		g_iFd = -1;
+		m_sStatus = "创建虚拟网卡失败";
+		return false;
+	}
+	bool bConnected = false;
+	int iError = 0;
+	for (uint32_t iUnit = 1; iUnit < 64; ++iUnit)
+	{
+		sockaddr_ctl stAddr;
+		memset(&stAddr, 0, sizeof(stAddr));
+		stAddr.sc_len = sizeof(stAddr);
+		stAddr.sc_family = AF_SYSTEM;
+		stAddr.ss_sysaddr = AF_SYS_CONTROL;
+		stAddr.sc_id = stInfo.ctl_id;
+		stAddr.sc_unit = iUnit;
+		if (connect(g_iFd, (sockaddr*)&stAddr, sizeof(stAddr)) == 0)
+		{
+			bConnected = true;
+			break;
+		}
+		iError = errno;
+	}
+	if (!bConnected)
+	{
+		close(g_iFd);
+		g_iFd = -1;
+		m_sStatus = iError == EPERM ? "创建虚拟网卡需要管理员权限" : "创建虚拟网卡失败";
+		return false;
+	}
+	socklen_t iLen = (socklen_t)sizeof(g_sIfName);
+	if (getsockopt(g_iFd, SYSPROTO_CONTROL, UTUN_OPT_IFNAME, g_sIfName, &iLen) != 0 || g_sIfName[0] == 0)
+	{
+		close(g_iFd);
+		g_iFd = -1;
+		m_sStatus = "创建虚拟网卡失败";
+		return false;
+	}
+	g_sIfName[sizeof(g_sIfName) - 1] = 0;
+	int iSocket = socket(AF_INET, SOCK_DGRAM, 0);
+	if (iSocket >= 0)
+	{
+		ifreq stRequest;
+		memset(&stRequest, 0, sizeof(stRequest));
+		strncpy(stRequest.ifr_name, g_sIfName, IFNAMSIZ - 1);
+		stRequest.ifr_mtu = (int)::Lan::kFrameMax;
+		ioctl(iSocket, SIOCSIFMTU, &stRequest);
+		close(iSocket);
+	}
+	m_sStatus = g_sIfName;
+	return true;
+}
+
+void TunMgr::Close()
+{
+	std::lock_guard<std::mutex> stLock(g_stWriteLock);
+	if (g_iFd >= 0)
+	{
+		shutdown(g_iFd, SHUT_RDWR);
+		close(g_iFd);
+		g_iFd = -1;
+	}
+}
+
+void TunMgr::ApplyAddress()
+{
+	uint32_t iAddress = RoomMgr::GetInstance().Current().iVirtualIp;
+	if (iAddress == 0 || iAddress == m_iAddress || g_iFd < 0 || g_sIfName[0] == 0)
+	{
+		return;
+	}
+	int iSocket = socket(AF_INET, SOCK_DGRAM, 0);
+	if (iSocket < 0)
+	{
+		return;
+	}
+	ifreq stRequest;
+	memset(&stRequest, 0, sizeof(stRequest));
+	strncpy(stRequest.ifr_name, g_sIfName, IFNAMSIZ - 1);
+	sockaddr_in* pAddress = (sockaddr_in*)&stRequest.ifr_addr;
+	pAddress->sin_len = sizeof(*pAddress);
+	pAddress->sin_family = AF_INET;
+	pAddress->sin_addr.s_addr = htonl(iAddress);
+	if (ioctl(iSocket, SIOCSIFADDR, &stRequest) != 0)
+	{
+		close(iSocket);
+		return;
+	}
+	memset(&stRequest, 0, sizeof(stRequest));
+	strncpy(stRequest.ifr_name, g_sIfName, IFNAMSIZ - 1);
+	pAddress = (sockaddr_in*)&stRequest.ifr_addr;
+	pAddress->sin_len = sizeof(*pAddress);
+	pAddress->sin_family = AF_INET;
+	pAddress->sin_addr.s_addr = htonl(0xFFFFFF00u);
+	ioctl(iSocket, SIOCSIFNETMASK, &stRequest);
+	memset(&stRequest, 0, sizeof(stRequest));
+	strncpy(stRequest.ifr_name, g_sIfName, IFNAMSIZ - 1);
+	if (ioctl(iSocket, SIOCGIFFLAGS, &stRequest) == 0)
+	{
+		stRequest.ifr_flags |= IFF_UP | IFF_RUNNING;
+		ioctl(iSocket, SIOCSIFFLAGS, &stRequest);
+	}
+	close(iSocket);
+	m_iAddress = iAddress;
+	m_sStatus = std::string(g_sIfName) + " " + ::Lan::Ipv4::Text(iAddress) + "/24";
+}
+
+void TunMgr::ReadLoop()
+{
+	std::vector<uint8_t> vPacket(::Lan::kFrameMax + 4);
+	while (g_bRun.load())
+	{
+		ApplyAddress();
+		int iFd = g_iFd;
+		if (iFd < 0)
+		{
+			break;
+		}
+		pollfd stPoll;
+		stPoll.fd = iFd;
+		stPoll.events = POLLIN;
+		if (poll(&stPoll, 1, 200) <= 0)
+		{
+			continue;
+		}
+		int iCount = (int)read(iFd, vPacket.data(), vPacket.size());
+		if (iCount <= 4)
+		{
+			if (!g_bRun.load())
+			{
+				break;
+			}
+			continue;
+		}
+		uint32_t iFamily = 0;
+		memcpy(&iFamily, vPacket.data(), 4);
+		if (ntohl(iFamily) != AF_INET)
+		{
+			continue;
+		}
+		int iSize = iCount - 4;
+		if (iSize > (int)::Lan::kFrameMax)
+		{
+			continue;
+		}
+		RoomMgr::GetInstance().PushOutbound(std::vector<uint8_t>(vPacket.begin() + 4, vPacket.begin() + 4 + iSize));
+	}
+}
+
+bool TunMgr::Write(const std::vector<uint8_t>& vFrame)
+{
+	std::lock_guard<std::mutex> stLock(g_stWriteLock);
+	if (g_iFd < 0 || vFrame.empty() || vFrame.size() > ::Lan::kFrameMax)
+	{
+		return false;
+	}
+	std::vector<uint8_t> vPacket(4 + vFrame.size());
+	uint32_t iFamily = htonl(AF_INET);
+	memcpy(vPacket.data(), &iFamily, 4);
+	memcpy(vPacket.data() + 4, vFrame.data(), vFrame.size());
+	return write(g_iFd, vPacket.data(), vPacket.size()) == (ssize_t)vPacket.size();
+}
+
+#elif defined(__linux__)
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <linux/if_tun.h>
@@ -358,6 +563,8 @@ bool TunMgr::Write(const std::vector<uint8_t>& vFrame)
 	}
 	return write(g_iFd, vFrame.data(), vFrame.size()) == (ssize_t)vFrame.size();
 }
+#else
+#error "tun is implemented for Windows, macOS, and Linux"
 #endif
 
 bool TunMgr::Start()

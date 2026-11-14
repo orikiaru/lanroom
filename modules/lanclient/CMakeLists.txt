@@ -18,7 +18,7 @@ target_include_directories(lanclient PRIVATE
 )
 target_link_libraries(lanclient PRIVATE proto_m_static net_m_static logger_m_static base_m_static timer_m_static jsoncpp_static)
 if(WIN32)
-	target_sources(lanclient PRIVATE src/client_gui.cpp)
+	target_sources(lanclient PRIVATE src/client_gui.cpp src/client_gui_session.cpp)
 	target_include_directories(lanclient PRIVATE
 		${CMAKE_SOURCE_DIR}/third_party/webview/core/include
 		${CMAKE_SOURCE_DIR}/third_party/webview2/build/native/include
@@ -34,4 +34,13 @@ if(WIN32)
 			${CMAKE_SOURCE_DIR}/third_party/wintun/bin/amd64/wintun.dll
 			$<TARGET_FILE_DIR:lanclient>)
 	target_link_libraries(lanclient PRIVATE ws2_32 iphlpapi)
+elseif(APPLE)
+	target_sources(lanclient PRIVATE src/client_gui_mac.mm src/client_gui_session.cpp)
+	set_source_files_properties(src/client_gui_session.cpp PROPERTIES
+		LANGUAGE OBJCXX
+		COMPILE_OPTIONS "-Wno-deprecated-literal-operator;-Wno-auto-var-id")
+	target_include_directories(lanclient PRIVATE
+		${CMAKE_SOURCE_DIR}/third_party/webview/core/include
+	)
+	target_link_libraries(lanclient PRIVATE "-framework Cocoa" "-framework WebKit" "-framework CoreGraphics")
 endif()

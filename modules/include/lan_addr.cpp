@@ -5,6 +5,15 @@
 #ifdef _WIN32
 #include <winsock2.h>
 #include <iphlpapi.h>
+#elif defined(__APPLE__)
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <net/if_dl.h>
+#include <net/route.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <unistd.h>
 #else
 #include <arpa/inet.h>
 #include <net/if.h>
@@ -79,6 +88,86 @@ bool MacAddress::FromUplink()
 		return m_vBytes[0] != 0 || m_vBytes[1] != 0 || m_vBytes[2] != 0 || m_vBytes[3] != 0 || m_vBytes[4] != 0 || m_vBytes[5] != 0;
 	}
 	return false;
+#elif defined(__APPLE__)
+	int iRoute = socket(PF_ROUTE, SOCK_RAW, AF_INET);
+	if (iRoute < 0)
+	{
+		return false;
+	}
+	struct
+	{
+		rt_msghdr stHeader;
+		sockaddr_in stDest;
+	} stMessage;
+	memset(&stMessage, 0, sizeof(stMessage));
+	stMessage.stHeader.rtm_msglen = sizeof(stMessage);
+	stMessage.stHeader.rtm_version = RTM_VERSION;
+	stMessage.stHeader.rtm_type = RTM_GET;
+	stMessage.stHeader.rtm_addrs = RTA_DST;
+	stMessage.stHeader.rtm_pid = getpid();
+	stMessage.stHeader.rtm_seq = 1;
+	stMessage.stDest.sin_len = sizeof(stMessage.stDest);
+	stMessage.stDest.sin_family = AF_INET;
+	if (inet_pton(AF_INET, "1.1.1.1", &stMessage.stDest.sin_addr) != 1 || write(iRoute, &stMessage, sizeof(stMessage)) != (ssize_t)sizeof(stMessage))
+	{
+		close(iRoute);
+		return false;
+	}
+	timeval stWait;
+	stWait.tv_sec = 1;
+	stWait.tv_usec = 0;
+	setsockopt(iRoute, SOL_SOCKET, SO_RCVTIMEO, &stWait, sizeof(stWait));
+	char vReply[2048];
+	unsigned int iIndex = 0;
+	bool bRoute = false;
+	for (int iTry = 0; iTry < 8; ++iTry)
+	{
+		ssize_t iCount = read(iRoute, vReply, sizeof(vReply));
+		if (iCount < (ssize_t)sizeof(rt_msghdr))
+		{
+			continue;
+		}
+		rt_msghdr* pHeader = (rt_msghdr*)vReply;
+		if (pHeader->rtm_seq != 1 || pHeader->rtm_pid != getpid())
+		{
+			continue;
+		}
+		if (pHeader->rtm_errno != 0 || pHeader->rtm_index == 0)
+		{
+			break;
+		}
+		iIndex = pHeader->rtm_index;
+		bRoute = true;
+		break;
+	}
+	close(iRoute);
+	if (!bRoute)
+	{
+		return false;
+	}
+	ifaddrs* pList = NULL;
+	if (getifaddrs(&pList) != 0)
+	{
+		return false;
+	}
+	bool bOk = false;
+	for (ifaddrs* pItem = pList; pItem != NULL; pItem = pItem->ifa_next)
+	{
+		if (pItem->ifa_addr == NULL || pItem->ifa_addr->sa_family != AF_LINK || if_nametoindex(pItem->ifa_name) != iIndex)
+		{
+			continue;
+		}
+		sockaddr_dl* pLink = (sockaddr_dl*)pItem->ifa_addr;
+		if (pLink->sdl_alen != (u_char)kLength)
+		{
+			continue;
+		}
+		memcpy(m_vBytes, LLADDR(pLink), kLength);
+		bOk = m_vBytes[0] != 0 || m_vBytes[1] != 0 || m_vBytes[2] != 0 || m_vBytes[3] != 0 || m_vBytes[4] != 0 || m_vBytes[5] != 0;
+		break;
+	}
+	freeifaddrs(pList);
+	return bOk;
 #else
 	FILE* pRoute = fopen("/proc/net/route", "r");
 	if (pRoute == NULL)

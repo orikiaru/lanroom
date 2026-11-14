@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(lanroom LANGUAGES C CXX)
+if(APPLE)
+	enable_language(OBJCXX)
+endif()
 
 # Ninja 配置会写出 compile_commands.json。Visual Studio 编译时改刷 build-clangd-win 或 build-clangd-linux。
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "Write compile_commands.json for clangd" FORCE)
