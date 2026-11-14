@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-// 本机虚拟网卡。Windows 用 Wintun，Linux 用 TUN，都是三层 IP 包。
+// 本机虚拟网卡。Windows 用 Wintun，macOS 用 utun，Linux 用 TUN，都是三层 IP 包。
 // 从网卡读到的包交给 RoomMgr 发出，房间里收到的包写回网卡。
 class TunMgr
 {

@@ -184,16 +184,27 @@ def start_client(room, mac, nic_port, bind="0.0.0.0", drop=False, tcp=False):
     deadline = time.time() + 8
     while time.time() < deadline:
         if proc.proc.poll() is not None:
-            raise RuntimeError("client exited: " + "".join(proc.lines[-20:]))
-        try:
-            nic = Nic(nic_port)
             break
+        if nic is None:
+            try:
+                nic = Nic(nic_port)
+            except OSError:
+                time.sleep(0.05)
+                continue
+        try:
+            reply = nic.cmd("VIRT")
         except OSError:
+            nic.close()
+            nic = None
             time.sleep(0.05)
-    if nic is None:
-        proc.stop()
-        raise RuntimeError("nic not ready: " + "".join(proc.lines[-20:]))
-    return proc, nic
+            continue
+        if reply.startswith("virt ") and reply != "virt 0.0.0.0":
+            return proc, nic
+        time.sleep(0.05)
+    if nic is not None:
+        nic.close()
+    proc.stop()
+    raise RuntimeError("client not joined: " + "".join(proc.lines[-20:]))
 
 
 def wait_members(room, count, timeout=4):

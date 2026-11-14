@@ -63,7 +63,7 @@ int main(int iArgumentCount, char* vArguments[])
 	}
 	if (sRoom.empty())
 	{
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
 		ClientGui stGui;
 		return stGui.Run(pConfig, sServer, iServerPort, sBind);
 #else
