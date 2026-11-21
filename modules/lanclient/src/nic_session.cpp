@@ -1,9 +1,12 @@
 #include "nic_session.h"
 #include "lan_addr.h"
 #include "nic_mgr.h"
+#include "oi_thread.h"
+#include "oi_timer_helper.h"
 #include "oi_timer_manager.h"
 #include "room_mgr.h"
 #include "roomudp.h"
+#include "tun_mgr.h"
 #include <stdlib.h>
 
 NicSession::NicSession(::OI::Net::SessionManager* pManager)
@@ -91,11 +94,33 @@ void NicSession::Command(const std::string& sLine)
 			NicMgr::GetInstance().SendText(iSessionId, std::string("peer ") + sMac + " " + ::Lan::Ipv4::Text(stPeer.iSourceIp) + " " + std::to_string(stPeer.iSourcePort) + " " + ::Lan::Ipv4::Text(stPeer.iVirtualIp) + " " + (stPeer.iDirect != 0 ? "1" : "0") + "\n");
 		}
 	}
-		else if (sLine == "LEAVE")
+	else if (sLine == "STATUS")
+	{
+		std::vector<RoomMgr::ClientBeacon> vBeacons;
+		RoomMgr::GetInstance().CopyBeacons(vBeacons);
+		const time_t iNow = ::OI::Timer::GetTime();
+		NicMgr::GetInstance().SendText(iSessionId, "status " + std::to_string(vBeacons.size()) + "\n");
+		for (const RoomMgr::ClientBeacon& stBeacon : vBeacons)
 		{
-			RoomMgr::GetInstance().RequestLeave();
-			NicMgr::GetInstance().SendText(iSessionId, "ok\n");
+			const time_t iAge = iNow >= stBeacon.iSeen ? iNow - stBeacon.iSeen : 0;
+			NicMgr::GetInstance().SendText(iSessionId, "client " + ::Lan::Ipv4::Text(stBeacon.iVirtualIp) + " " + stBeacon.sMac + " " + stBeacon.sPlace + " " + stBeacon.sPath + " " + stBeacon.sVia + " " + std::to_string(iAge) + "\n");
 		}
+	}
+	else if (sLine == "LEAVE")
+	{
+		RoomMgr::GetInstance().RequestLeave();
+		NicMgr::GetInstance().SendText(iSessionId, "ok\n");
+	}
+	else if (sLine == "TUN")
+	{
+		NicMgr::GetInstance().SendText(iSessionId, "tun " + TunMgr::GetInstance().Status() + "\n");
+	}
+	else if (sLine == "QUIT")
+	{
+		NicMgr::GetInstance().SendText(iSessionId, "ok\n");
+		RoomMgr::GetInstance().RequestLeave();
+		::OI::Thread::ThreadPool::GetInstance().RequestStop(0);
+	}
 		else if (sLine == "READ")
 	{
 		std::vector<uint8_t> vFrame;

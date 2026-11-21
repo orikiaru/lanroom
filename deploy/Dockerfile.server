@@ -1,0 +1,20 @@
+FROM ubuntu:24.04 AS build
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential cmake python3 pkg-config ca-certificates \
+	&& rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY . .
+RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+	&& cmake --build build --target lanserver lanclient --parallel 2
+
+FROM scratch AS bins
+COPY --from=build /src/build/lanroom-server /lanroom-server
+COPY --from=build /src/build/lanroom-client /lanroom-client
+
+FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+	&& rm -rf /var/lib/apt/lists/*
+COPY --from=build /src/build/lanroom-server /usr/local/bin/lanroom-server
+COPY deploy/server-entry.sh /entry.sh
+RUN chmod +x /entry.sh
+EXPOSE 17000/udp 17001/tcp
+ENTRYPOINT ["/entry.sh"]

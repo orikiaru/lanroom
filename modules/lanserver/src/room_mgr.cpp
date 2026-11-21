@@ -4,8 +4,10 @@
 #include "oi_duration.h"
 #include "oi_errno.h"
 #include "oi_log.h"
+#include "oi_redis_cmd.h"
 #include "oi_rpcdata_roomcastreq.h"
 #include "oi_timer_helper.h"
+#include "room_auth.h"
 #include "roomserver.h"
 #include "rpc_ids.h"
 
@@ -18,6 +20,7 @@ void RoomMgr::Init()
 	int64_t iTtl = 1;
 	::OI::Base::Config::GlobalConfig().GetAs("LanServer.member_ttl", iTtl);
 	m_iMemberTtl = (time_t)iTtl;
+	::OI::Base::Config::GlobalConfig().GetAs("LanServer.auth_secret", m_sAuthSecret);
 }
 
 std::shared_ptr<Room> RoomMgr::Take(const std::string& sRoom)
@@ -43,6 +46,56 @@ std::shared_ptr<Room> RoomMgr::Take(const std::string& sRoom)
 		}
 	}
 	co_return pRoom;
+}
+
+::OI::Coro::TaskResult<int32_t> RoomMgr::Authorize(const std::string& sRoom, const std::string& sToken)
+{
+	if (m_sAuthSecret.empty())
+	{
+		co_return OI_OK;
+	}
+	std::string sOwner;
+	if (!TicketOwner(m_sAuthSecret, sRoom, sToken, sOwner))
+	{
+		LOG_WARNING("RoomMgr::Authorize reject room=%s reason=ticket", sRoom.c_str());
+		co_return OI_ERR_NOT_FOUND;
+	}
+	std::string sStored;
+	const int32_t iRead = co_await ::OI::Redis::RedisGet(std::string("lanroom:room:") + sRoom, sStored);
+	if (iRead != OI_OK || sStored != sOwner)
+	{
+		LOG_WARNING("RoomMgr::Authorize reject room=%s reason=room", sRoom.c_str());
+		co_return OI_ERR_NOT_FOUND;
+	}
+	co_return OI_OK;
+}
+
+::OI::Coro::TaskResult<bool> RoomMgr::Kicked(const std::string& sRoom, const std::string& sMac)
+{
+	if (m_sAuthSecret.empty())
+	{
+		co_return false;
+	}
+	std::string sFlag;
+	const int32_t iRead = co_await ::OI::Redis::RedisGet(std::string("lanroom:kick:") + sRoom + ":" + sMac, sFlag);
+	co_return iRead == OI_OK;
+}
+
+::OI::Coro::Task RoomMgr::PublishLive(const Room& stRoom)
+{
+	const std::string sKey = std::string("lanroom:live:") + stRoom.Name();
+	const std::string sText = stRoom.LiveText();
+	if (sText.empty())
+	{
+		co_await ::OI::Redis::RedisDel(sKey);
+		co_return;
+	}
+	const int32_t iSaved = co_await ::OI::Redis::RedisSet(sKey, sText, ::OI::Timer::Seconds(m_iMemberTtl));
+	if (iSaved != OI_OK)
+	{
+		LOG_WARNING("RoomMgr::PublishLive room=%s code=%d", stRoom.Name().c_str(), iSaved);
+	}
+	co_return;
 }
 
 void RoomMgr::ReleaseSession(sid_t iSessionId)
@@ -72,6 +125,16 @@ int32_t RoomMgr::Probe(const ::OI::RpcData::ProbeReq& stProbe, uint32_t iSourceI
 	{
 		LOG_WARNING("RoomMgr::Join reject room=%s", stRequest.sRoom.c_str());
 		co_return OI_ERR_INVALID_ARGUMENT;
+	}
+	const int32_t iAllowed = co_await Authorize(stRequest.sRoom, stRequest.sToken);
+	if (iAllowed != OI_OK)
+	{
+		co_return iAllowed;
+	}
+	if (co_await Kicked(stRequest.sRoom, stMac.Colon()))
+	{
+		LOG_WARNING("RoomMgr::Join kick room=%s mac=%s", stRequest.sRoom.c_str(), stMac.Colon().c_str());
+		co_return OI_ERR_NOT_FOUND;
 	}
 	std::shared_ptr<Room> pRoom = co_await Load(stRequest.sRoom);
 	if (!pRoom)
@@ -106,6 +169,7 @@ int32_t RoomMgr::Probe(const ::OI::RpcData::ProbeReq& stProbe, uint32_t iSourceI
 		co_return iSaved;
 	}
 	Broadcast(stRequest.sRoom, vSessions, vPeers, stAttr);
+	co_await PublishLive(stRoom);
 	co_return OI_OK;
 }
 
@@ -116,6 +180,38 @@ int32_t RoomMgr::Probe(const ::OI::RpcData::ProbeReq& stProbe, uint32_t iSourceI
 	{
 		LOG_WARNING("RoomMgr::Heartbeat reject room=%s", stRequest.sRoom.c_str());
 		co_return OI_ERR_INVALID_ARGUMENT;
+	}
+	const int32_t iAllowed = co_await Authorize(stRequest.sRoom, stRequest.sToken);
+	if (iAllowed != OI_OK)
+	{
+		co_return iAllowed;
+	}
+	if (co_await Kicked(stRequest.sRoom, stMac.Colon()))
+	{
+		std::shared_ptr<Room> pKicked = co_await Load(stRequest.sRoom);
+		if (pKicked)
+		{
+			uint32_t iSourceIp = 0;
+			uint16_t iSourcePort = 0;
+			if (pKicked->Claim(stMac, stContext.iSessionId, iSourceIp, iSourcePort))
+			{
+				const bool bRemoved = pKicked->Remove(iSourceIp, stMac);
+				pKicked->Release(stContext.iSessionId);
+				if (bRemoved)
+				{
+					std::vector<sid_t> vSessions;
+					std::vector<::OI::RpcData::RoomPeer> vPeers;
+					::OI::RpcData::RoomAttr stAttr = pKicked->Attr();
+					pKicked->CollectSessions(stContext.iSessionId, vSessions);
+					pKicked->CopyPeers(vPeers);
+					co_await pKicked->Saved(::OI::Timer::Seconds(m_iMemberTtl));
+					Broadcast(stRequest.sRoom, vSessions, vPeers, stAttr);
+					co_await PublishLive(*pKicked);
+				}
+			}
+		}
+		LOG_WARNING("RoomMgr::Heartbeat kick room=%s mac=%s", stRequest.sRoom.c_str(), stMac.Colon().c_str());
+		co_return OI_ERR_NOT_FOUND;
 	}
 	std::shared_ptr<Room> pRoom = co_await Load(stRequest.sRoom);
 	if (!pRoom)
@@ -143,6 +239,7 @@ int32_t RoomMgr::Probe(const ::OI::RpcData::ProbeReq& stProbe, uint32_t iSourceI
 		LOG_WARNING("RoomMgr::Heartbeat save room=%s code=%d", stRequest.sRoom.c_str(), iSaved);
 		co_return iSaved;
 	}
+	co_await PublishLive(stRoom);
 	co_return OI_OK;
 }
 
@@ -162,17 +259,19 @@ int32_t RoomMgr::Probe(const ::OI::RpcData::ProbeReq& stProbe, uint32_t iSourceI
 	Room& stRoom = *pRoom;
 	uint32_t iSourceIp = 0;
 	uint16_t iSourcePort = 0;
-	if (!stRoom.Claim(stMac, stContext.iSessionId, iSourceIp, iSourcePort))
+	if (!stRoom.Owned(stMac, stContext.iSessionId, iSourceIp, iSourcePort))
 	{
-		LOG_WARNING("RoomMgr::Leave reject room=%s mac=%s sid=%d reason=no-probe", stRequest.sRoom.c_str(), stMac.Colon().c_str(), stContext.iSessionId);
+		LOG_WARNING("RoomMgr::Leave reject room=%s mac=%s sid=%d reason=unowned", stRequest.sRoom.c_str(), stMac.Colon().c_str(), stContext.iSessionId);
 		co_return OI_ERR_NOT_FOUND;
 	}
 	if (!stRoom.Remove(iSourceIp, stMac))
 	{
+		stRoom.Release(stContext.iSessionId);
 		stResponse.iLeft = 0;
 		LOG_INFO("RoomMgr::Leave absent room=%s mac=%s", stRequest.sRoom.c_str(), stMac.Colon().c_str());
 		co_return OI_OK;
 	}
+	stRoom.Release(stContext.iSessionId);
 	stResponse.iLeft = 1;
 	std::vector<sid_t> vSessions;
 	std::vector<::OI::RpcData::RoomPeer> vPeers;
@@ -187,6 +286,7 @@ int32_t RoomMgr::Probe(const ::OI::RpcData::ProbeReq& stProbe, uint32_t iSourceI
 	}
 	LOG_INFO("RoomMgr::Leave room=%s mac=%s src=%s:%u members=%zu version=%u", stRequest.sRoom.c_str(), stMac.Colon().c_str(), ::Lan::Ipv4::Text(iSourceIp).c_str(), iSourcePort, vPeers.size(), stAttr.iVersion);
 	Broadcast(stRequest.sRoom, vSessions, vPeers, stAttr);
+	co_await PublishLive(stRoom);
 	co_return OI_OK;
 }
 
@@ -224,9 +324,9 @@ void RoomMgr::Broadcast(const std::string& sRoom, const std::vector<sid_t>& vSes
 	Room& stRoom = *pRoom;
 	uint32_t iSourceIp = 0;
 	uint16_t iSourcePort = 0;
-	if (!stRoom.Claim(stMac, stContext.iSessionId, iSourceIp, iSourcePort))
+	if (!stRoom.Owned(stMac, stContext.iSessionId, iSourceIp, iSourcePort) || !stRoom.HasUser(iSourceIp, stMac))
 	{
-		LOG_WARNING("RoomMgr::Carry reject room=%s mac=%s sid=%d reason=no-probe", stCarry.sRoom.c_str(), stMac.Colon().c_str(), stContext.iSessionId);
+		LOG_WARNING("RoomMgr::Carry reject room=%s mac=%s sid=%d reason=not-member", stCarry.sRoom.c_str(), stMac.Colon().c_str(), stContext.iSessionId);
 		co_return OI_ERR_NOT_FOUND;
 	}
 	std::vector<sid_t> vSessions;

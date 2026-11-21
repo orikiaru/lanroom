@@ -3,6 +3,7 @@
 #include "room_mgr.h"
 #include "roomclient.h"
 #include "roomudp.h"
+#include "tun_mgr.h"
 #include "oi_app.h"
 #include "oi_base.h"
 #include "oi_log.h"
@@ -10,6 +11,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
+#if !defined(_WIN32)
+#include <unistd.h>
+#endif
 
 int main(int iArgumentCount, char* vArguments[])
 {
@@ -22,6 +26,8 @@ int main(int iArgumentCount, char* vArguments[])
 	int iNicPort = 0;
 	bool bDrop = false;
 	bool bTcp = false;
+	bool bTun = false;
+	std::string sToken;
 	for (int iIndex = 1; iIndex < iArgumentCount; ++iIndex)
 	{
 		std::string sArg = vArguments[iIndex];
@@ -61,6 +67,14 @@ int main(int iArgumentCount, char* vArguments[])
 		{
 			bTcp = true;
 		}
+		else if (sArg == "--tun")
+		{
+			bTun = true;
+		}
+		else if (sArg == "--token" && iIndex + 1 < iArgumentCount)
+		{
+			sToken = vArguments[++iIndex];
+		}
 	}
 	if (sRoom.empty())
 	{
@@ -68,8 +82,29 @@ int main(int iArgumentCount, char* vArguments[])
 		ClientGui stGui;
 		return stGui.Run(pConfig, sServer, iServerPort, sBind);
 #else
-		fprintf(stderr, "usage: lanroom-client --room name --mac aa:bb:cc:dd:ee:ff --nic-port N [--bind ip] [--server ip] [--server-port N]\n");
+		fprintf(stderr, "usage: lanroom-client --room name --mac aa:bb:cc:dd:ee:ff --nic-port N [--bind ip] [--server ip] [--server-port N] [--token ticket] [--tun]\n");
 		return 2;
+#endif
+	}
+	if (bTun)
+	{
+#if defined(_WIN32) || defined(__APPLE__)
+		int iElevated = ClientEnsureElevated();
+		if (iElevated > 0)
+		{
+			return 0;
+		}
+		if (iElevated < 0)
+		{
+			fprintf(stderr, "创建虚拟网卡需要管理员权限\n");
+			return 1;
+		}
+#else
+		if (geteuid() != 0)
+		{
+			fprintf(stderr, "创建虚拟网卡需要管理员权限\n");
+			return 1;
+		}
 #endif
 	}
 	int iCode = ::OI::Base::StartFramework(pConfig);
@@ -85,9 +120,10 @@ int main(int iArgumentCount, char* vArguments[])
 	{
 		try
 		{
+			RoomMgr::GetInstance().SetToken(sToken);
 			if (!RoomMgr::GetInstance().Prepare(sRoom, sMac, sServer, (uint16_t)iServerPort, bDrop, bTcp) || !NicMgr::GetInstance().Listen((uint16_t)iNicPort))
 			{
-				fprintf(stderr, "usage: lanroom-client --room name --mac aa:bb:cc:dd:ee:ff --nic-port N [--bind ip] [--server ip] [--server-port N]\n");
+				fprintf(stderr, "usage: lanroom-client --room name --mac aa:bb:cc:dd:ee:ff --nic-port N [--bind ip] [--server ip] [--server-port N] [--token ticket] [--tun]\n");
 				return 2;
 			}
 			if ((iCode = RoomUdp::GetInstance().Init(sBind)) != OI_OK || (iCode = RoomUdp::GetInstance().StartServer()) != OI_OK)
@@ -107,6 +143,11 @@ int main(int iArgumentCount, char* vArguments[])
 			{
 				fprintf(stderr, "RoomClient start failed code=%d\n", iCode);
 				return iCode;
+			}
+			if (bTun && !TunMgr::GetInstance().Start())
+			{
+				fprintf(stderr, "%s\n", TunMgr::GetInstance().Status().c_str());
+				return 1;
 			}
 			RoomMgr::GetInstance().Start();
 		}
@@ -130,6 +171,10 @@ int main(int iArgumentCount, char* vArguments[])
 		return iCode;
 	}
 	iCode = ::OI::Base::RunFramework();
+	if (bTun)
+	{
+		TunMgr::GetInstance().Stop();
+	}
 	RoomMgr::GetInstance().Stop();
 	return iCode;
 }

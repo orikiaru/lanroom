@@ -82,16 +82,26 @@ bool RelaunchElevated()
 }
 }
 
+int ClientEnsureElevated()
+{
+	if (geteuid() == 0)
+	{
+		return 0;
+	}
+	return RelaunchElevated() ? 1 : -1;
+}
+
 int ClientGui::Run(const char* pConfig, const std::string& sServer, int iPort, const std::string& sBind)
 {
-	if (geteuid() != 0)
+	int iElevated = ClientEnsureElevated();
+	if (iElevated > 0)
 	{
-		if (!RelaunchElevated())
-		{
-			fprintf(stderr, "创建虚拟网卡需要管理员权限\n");
-			return 1;
-		}
 		return 0;
+	}
+	if (iElevated < 0)
+	{
+		fprintf(stderr, "创建虚拟网卡需要管理员权限\n");
+		return 1;
 	}
 	return RunClientWindow(pConfig, sServer, iPort, sBind);
 }

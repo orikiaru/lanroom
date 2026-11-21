@@ -34,6 +34,7 @@ rpcdata JoinReq {
     0 string sRoom;
     1 string sMac;
     2 RoomAttr stAttr;
+    3 string sToken;
 }
 
 rpcdata JoinRes {
@@ -46,6 +47,7 @@ rpcdata HeartbeatReq {
     0 string sRoom;
     1 string sMac;
     2 uint8_t iSawPunch;
+    3 string sToken;
 }
 
 rpcdata HeartbeatRes {

@@ -1,5 +1,6 @@
 #pragma once
 #include "oi_singleton.h"
+#include <mutex>
 #include <stdint.h>
 #include <string>
 #include <vector>
@@ -11,8 +12,10 @@ class TunMgr
 	DECLARE_SINGLETON(TunMgr)
 	TunMgr();
 
+	mutable std::mutex m_stStatusLock;
 	std::string m_sStatus = "未创建";
 	uint32_t m_iAddress = 0;
+	void SetStatus(const std::string& sStatus);
 
   public:
 	bool Start();

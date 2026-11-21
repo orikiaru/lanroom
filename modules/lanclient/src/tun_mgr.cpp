@@ -186,7 +186,7 @@ void TunMgr::ApplyAddress()
 	RunNetsh(L"interface ipv4 set subinterface \"" + sName + L"\" mtu=" + std::to_wstring(::Lan::kFrameMax) + L" store=active");
 	RunNetsh(L"interface ip set address name=\"" + sName + L"\" static " + sAddress + L" 255.255.255.0");
 	m_iAddress = iAddress;
-	m_sStatus = Narrow(sName) + " " + sText + "/24";
+	SetStatus(Narrow(sName) + " " + sText + "/24");
 }
 
 void TunMgr::ReadLoop()
@@ -255,6 +255,55 @@ char g_sIfName[IFNAMSIZ];
 std::mutex g_stWriteLock;
 std::atomic<bool> g_bRun{false};
 std::thread g_stRead;
+
+void RemoveSubnetRoute(uint32_t iAddress)
+{
+	if (iAddress == 0 || g_sIfName[0] == 0)
+	{
+		return;
+	}
+	int iRoute = socket(PF_ROUTE, SOCK_RAW, AF_INET);
+	if (iRoute < 0)
+	{
+		return;
+	}
+	auto fnPut = [](std::vector<uint8_t>& vMessage, const void* pAddress, uint8_t iLength)
+	{
+		const uint8_t iRounded = (uint8_t)((iLength + 3) & ~3);
+		const size_t iAt = vMessage.size();
+		vMessage.resize(iAt + iRounded, 0);
+		memcpy(vMessage.data() + iAt, pAddress, iLength);
+	};
+	sockaddr_in stDest;
+	memset(&stDest, 0, sizeof(stDest));
+	stDest.sin_len = sizeof(stDest);
+	stDest.sin_family = AF_INET;
+	stDest.sin_addr.s_addr = htonl(iAddress & 0xFFFFFF00u);
+	sockaddr_dl stGate;
+	memset(&stGate, 0, sizeof(stGate));
+	stGate.sdl_len = sizeof(stGate);
+	stGate.sdl_family = AF_LINK;
+	stGate.sdl_index = (u_short)if_nametoindex(g_sIfName);
+	sockaddr_in stMask;
+	memset(&stMask, 0, sizeof(stMask));
+	stMask.sin_len = sizeof(stMask);
+	stMask.sin_family = AF_INET;
+	stMask.sin_addr.s_addr = htonl(0xFFFFFF00u);
+	std::vector<uint8_t> vMessage(sizeof(rt_msghdr), 0);
+	fnPut(vMessage, &stDest, stDest.sin_len);
+	fnPut(vMessage, &stGate, stGate.sdl_len);
+	fnPut(vMessage, &stMask, stMask.sin_len);
+	rt_msghdr* pHeader = (rt_msghdr*)vMessage.data();
+	pHeader->rtm_msglen = (u_short)vMessage.size();
+	pHeader->rtm_version = RTM_VERSION;
+	pHeader->rtm_type = RTM_DELETE;
+	pHeader->rtm_flags = RTF_UP | RTF_STATIC;
+	pHeader->rtm_addrs = RTA_DST | RTA_GATEWAY | RTA_NETMASK;
+	pHeader->rtm_pid = getpid();
+	pHeader->rtm_seq = 1;
+	write(iRoute, vMessage.data(), vMessage.size());
+	close(iRoute);
+}
 }
 
 TunMgr::TunMgr()
@@ -331,6 +380,8 @@ bool TunMgr::Open()
 void TunMgr::Close()
 {
 	std::lock_guard<std::mutex> stLock(g_stWriteLock);
+	RemoveSubnetRoute(m_iAddress);
+	m_iAddress = 0;
 	if (g_iFd >= 0)
 	{
 		shutdown(g_iFd, SHUT_RDWR);
@@ -345,6 +396,10 @@ void TunMgr::ApplyAddress()
 	if (iAddress == 0 || iAddress == m_iAddress || g_iFd < 0 || g_sIfName[0] == 0)
 	{
 		return;
+	}
+	if (m_iAddress != 0)
+	{
+		RemoveSubnetRoute(m_iAddress);
 	}
 	int iSocket = socket(AF_INET, SOCK_DGRAM, 0);
 	if (iSocket < 0)
@@ -420,7 +475,7 @@ void TunMgr::ApplyAddress()
 		close(iRoute);
 	}
 	m_iAddress = iAddress;
-	m_sStatus = std::string(g_sIfName) + " " + ::Lan::Ipv4::Text(iAddress) + "/24";
+	SetStatus(std::string(g_sIfName) + " " + ::Lan::Ipv4::Text(iAddress) + "/24");
 }
 
 void TunMgr::ReadLoop()
@@ -461,7 +516,24 @@ void TunMgr::ReadLoop()
 		{
 			continue;
 		}
-		RoomMgr::GetInstance().PushOutbound(std::vector<uint8_t>(vPacket.begin() + 4, vPacket.begin() + 4 + iSize));
+		std::vector<uint8_t> vFrame(vPacket.begin() + 4, vPacket.begin() + 4 + iSize);
+		// 发往本机虚拟地址的包会被这条 /24 路由送进 utun，套接字收不到。写回去才交给本机。
+		if (vFrame.size() >= 20 && (vFrame[0] >> 4) == 4 && vFrame[8] > 1)
+		{
+			uint32_t iDest = ((uint32_t)vFrame[16] << 24) | ((uint32_t)vFrame[17] << 16) | ((uint32_t)vFrame[18] << 8) | (uint32_t)vFrame[19];
+			if (iDest != 0 && iDest == RoomMgr::GetInstance().VirtualIp())
+			{
+				uint32_t iSum = ((uint32_t)vFrame[10] << 8) | vFrame[11];
+				iSum += 0x0100;
+				iSum = (iSum & 0xffff) + (iSum >> 16);
+				vFrame[8] -= 1;
+				vFrame[10] = (uint8_t)(iSum >> 8);
+				vFrame[11] = (uint8_t)iSum;
+				Write(vFrame);
+				continue;
+			}
+		}
+		RoomMgr::GetInstance().PushOutbound(std::move(vFrame));
 	}
 }
 
@@ -484,6 +556,7 @@ bool TunMgr::Write(const std::vector<uint8_t>& vFrame)
 #include <fcntl.h>
 #include <linux/if_tun.h>
 #include <net/if.h>
+#include <poll.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
@@ -575,7 +648,7 @@ void TunMgr::ApplyAddress()
 	}
 	close(iSocket);
 	m_iAddress = iAddress;
-	m_sStatus = "lanroom0 " + ::Lan::Ipv4::Text(iAddress) + "/24";
+	SetStatus("lanroom0 " + ::Lan::Ipv4::Text(iAddress) + "/24");
 }
 
 void TunMgr::ReadLoop()
@@ -584,7 +657,19 @@ void TunMgr::ReadLoop()
 	while (g_bRun.load())
 	{
 		ApplyAddress();
-		int iCount = (int)read(g_iFd, vPacket.data(), vPacket.size());
+		int iFd = g_iFd;
+		if (iFd < 0)
+		{
+			break;
+		}
+		pollfd stPoll;
+		stPoll.fd = iFd;
+		stPoll.events = POLLIN;
+		if (poll(&stPoll, 1, 200) <= 0)
+		{
+			continue;
+		}
+		int iCount = (int)read(iFd, vPacket.data(), vPacket.size());
 		if (iCount <= 0)
 		{
 			if (!g_bRun.load())
@@ -635,7 +720,14 @@ void TunMgr::Stop()
 	}
 }
 
+void TunMgr::SetStatus(const std::string& sStatus)
+{
+	std::lock_guard<std::mutex> stLock(m_stStatusLock);
+	m_sStatus = sStatus;
+}
+
 std::string TunMgr::Status() const
 {
+	std::lock_guard<std::mutex> stLock(m_stStatusLock);
 	return m_sStatus;
 }

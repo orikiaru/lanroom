@@ -11,9 +11,20 @@
 #include "oi_rpcdata_roompeer.h"
 #include "oi_singleton.h"
 #include <atomic>
+#include <ctime>
 #include <deque>
 #include <string>
 #include <vector>
+
+struct RoomClientBeacon
+{
+	uint32_t iVirtualIp = 0;
+	std::string sMac;
+	std::string sPlace;
+	std::string sPath;
+	std::string sVia;
+	time_t iSeen = 0;
+};
 
 class RoomMgr
 {
@@ -23,6 +34,7 @@ class RoomMgr
 	::OI::Thread::Mutex m_stStateLock;
 	sid_t m_iReadSession = 0;
 	std::string m_sRoom;
+	std::string m_sToken;
 	::Lan::MacAddress m_stMac;
 	uint32_t m_iServerIp = 0;
 	uint16_t m_iServerPort = 0;
@@ -41,17 +53,28 @@ class RoomMgr
 	std::vector<::OI::RpcData::RoomPeer> m_vPeers;
 	std::deque<std::vector<uint8_t>> m_vInbound;
 	std::atomic<bool> m_bRun;
+	std::vector<RoomClientBeacon> m_vBeacons;
+	time_t m_iLastAnnounce = 0;
+	int64_t m_iPeerSinceMs = 0;
 
 	const ::OI::RpcData::RoomPeer* OtherPeer() const;
+	bool KnownPeer(uint32_t iSourceIp, uint16_t iSourcePort) const;
 	bool FromServer(uint32_t iSourceIp, uint16_t iSourcePort) const;
-	void TakeFrame(const std::string& sFrame);
+	void TakeFrame(const std::string& sFrame, const char* sVia);
+	bool NoteBeacon(const std::string& sFrame, const char* sVia);
+	void RememberBeacon(const RoomClientBeacon& stBeacon);
+	void Announce();
+	static uint16_t HeaderSum(const uint8_t* pBytes, size_t iLength);
 	void KeepSnapshot(uint32_t iVirtualIp, const std::vector<::OI::RpcData::RoomPeer>& vPeers, const ::OI::RpcData::RoomAttr& stAttr);
 	void Probe();
 	void SendFrame(const std::vector<uint8_t>& vFrame);
 	void Punch();
 	::OI::Coro::Task Pump();
   public:
+	using ClientBeacon = RoomClientBeacon;
+
 	bool Prepare(const std::string& sRoom, const std::string& sMac, const std::string& sUdpServer, uint16_t iUdpPort, bool bDrop, bool bTcp);
+	void SetToken(const std::string& sToken);
 	bool Retarget(const std::string& sRoom, const std::string& sHost, uint16_t iPort, bool bTcp);
 	void RequestLeave();
 	int32_t Punched(const ::OI::RpcData::PunchReq& stPunch, uint32_t iSourceIp, uint16_t iSourcePort);
@@ -62,6 +85,7 @@ class RoomMgr
 	void SetDrop(bool bDrop);
 	uint32_t VirtualIp();
 	void CopyPeers(std::vector<::OI::RpcData::RoomPeer>& vPeers);
+	void CopyBeacons(std::vector<RoomClientBeacon>& vBeacons);
 	// 网卡读线程和假网卡直接调，当场发出，不排队。
 	bool PushOutbound(const std::vector<uint8_t>& vFrame);
 	bool Read(sid_t iSessionId, std::vector<uint8_t>& vFrame);

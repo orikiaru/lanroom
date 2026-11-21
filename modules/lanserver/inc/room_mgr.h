@@ -25,9 +25,13 @@ class RoomMgr
 
 	std::map<std::string, std::shared_ptr<Room>> m_mRoom;
 	time_t m_iMemberTtl = 1;
+	std::string m_sAuthSecret;
 
 	std::shared_ptr<Room> Take(const std::string& sRoom);
 	::OI::Coro::TaskResult<std::shared_ptr<Room>> Load(const std::string& sRoom);
+	::OI::Coro::TaskResult<int32_t> Authorize(const std::string& sRoom, const std::string& sToken);
+	::OI::Coro::TaskResult<bool> Kicked(const std::string& sRoom, const std::string& sMac);
+	::OI::Coro::Task PublishLive(const Room& stRoom);
 	void Broadcast(const std::string& sRoom, const std::vector<sid_t>& vSessions, const std::vector<::OI::RpcData::RoomPeer>& vPeers, const ::OI::RpcData::RoomAttr& stAttr);
 
   public:

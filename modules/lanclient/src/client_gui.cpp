@@ -55,18 +55,33 @@ bool RelaunchElevated()
 	stInfo.lpDirectory = vDirectory;
 	stInfo.lpParameters = sArgs.empty() ? NULL : sArgs.c_str();
 	stInfo.nShow = SW_SHOWNORMAL;
-	return ShellExecuteExW(&stInfo) == TRUE;
+	if (ShellExecuteExW(&stInfo) != TRUE)
+	{
+		return false;
+	}
+	if (stInfo.hProcess != NULL)
+	{
+		WaitForSingleObject(stInfo.hProcess, INFINITE);
+		CloseHandle(stInfo.hProcess);
+	}
+	return true;
 }
+}
+
+int ClientEnsureElevated()
+{
+	if (IsElevated())
+	{
+		return 0;
+	}
+	return RelaunchElevated() ? 1 : -1;
 }
 
 int ClientGui::Run(const char* pConfig, const std::string& sServer, int iPort, const std::string& sBind)
 {
-	if (!IsElevated())
+	if (ClientEnsureElevated() > 0)
 	{
-		if (RelaunchElevated())
-		{
-			return 0;
-		}
+		return 0;
 	}
 	return RunClientWindow(pConfig, sServer, iPort, sBind);
 }

@@ -1,5 +1,6 @@
 #include "room_mgr.h"
 #include "oi_duration.h"
+#include "oi_errno.h"
 #include "oi_log.h"
 #include "oi_rpcdata_leavereq.h"
 #include "oi_rpcdata_leaveres.h"
@@ -14,6 +15,8 @@
 #include "rpc_enums.h"
 #include "rpc_ids.h"
 #include "roomudp.h"
+#include "oi_timer_helper.h"
+#include <stdio.h>
 #include <string.h>
 #ifdef _WIN32
 #include <winsock2.h>
@@ -41,14 +44,234 @@ const ::OI::RpcData::RoomPeer* RoomMgr::OtherPeer() const
 	return NULL;
 }
 
+bool RoomMgr::KnownPeer(uint32_t iSourceIp, uint16_t iSourcePort) const
+{
+	if (iSourcePort == 0)
+	{
+		return false;
+	}
+	const std::string sSelf = m_stMac.Bytes();
+	for (const ::OI::RpcData::RoomPeer& stPeer : m_vPeers)
+	{
+		if (stPeer.sMac == sSelf && stPeer.iVirtualIp == m_iVirtualIp)
+		{
+			continue;
+		}
+		if (stPeer.iSourceIp == iSourceIp && stPeer.iSourcePort == iSourcePort)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 bool RoomMgr::FromServer(uint32_t iSourceIp, uint16_t iSourcePort) const
 {
 	return iSourceIp == m_iServerIp && iSourcePort == m_iServerPort;
 }
 
-void RoomMgr::TakeFrame(const std::string& sFrame)
+uint16_t RoomMgr::HeaderSum(const uint8_t* pBytes, size_t iLength)
+{
+	uint32_t iSum = 0;
+	for (size_t iIndex = 0; iIndex + 1 < iLength; iIndex += 2)
+	{
+		iSum += ((uint32_t)pBytes[iIndex] << 8) | pBytes[iIndex + 1];
+	}
+	if ((iLength & 1u) != 0)
+	{
+		iSum += (uint32_t)pBytes[iLength - 1] << 8;
+	}
+	while ((iSum >> 16) != 0)
+	{
+		iSum = (iSum & 0xFFFFu) + (iSum >> 16);
+	}
+	return (uint16_t)~iSum;
+}
+
+void RoomMgr::RememberBeacon(const RoomClientBeacon& stBeacon)
+{
+	for (RoomClientBeacon& stHave : m_vBeacons)
+	{
+		if (stHave.iVirtualIp != stBeacon.iVirtualIp)
+		{
+			continue;
+		}
+		const bool bChanged = stHave.sPlace != stBeacon.sPlace || stHave.sPath != stBeacon.sPath || stHave.sVia != stBeacon.sVia;
+		stHave = stBeacon;
+		if (bChanged)
+		{
+			LOG_INFO("RoomMgr::Status virt=%s place=%s path=%s via=%s", ::Lan::Ipv4::Text(stBeacon.iVirtualIp).c_str(), stBeacon.sPlace.c_str(), stBeacon.sPath.c_str(), stBeacon.sVia.c_str());
+		}
+		return;
+	}
+	m_vBeacons.push_back(stBeacon);
+	LOG_INFO("RoomMgr::Status virt=%s place=%s path=%s via=%s", ::Lan::Ipv4::Text(stBeacon.iVirtualIp).c_str(), stBeacon.sPlace.c_str(), stBeacon.sPath.c_str(), stBeacon.sVia.c_str());
+}
+
+bool RoomMgr::NoteBeacon(const std::string& sFrame, const char* sVia)
+{
+	if (sFrame.size() < 28)
+	{
+		return false;
+	}
+	const uint8_t* pBytes = (const uint8_t*)sFrame.data();
+	if ((pBytes[0] >> 4) != 4 || (pBytes[0] & 0x0F) != 5 || pBytes[9] != 17)
+	{
+		return false;
+	}
+	const uint16_t iDestPort = ((uint16_t)pBytes[22] << 8) | pBytes[23];
+	if (iDestPort != 4788)
+	{
+		return false;
+	}
+	const uint16_t iUdpLength = ((uint16_t)pBytes[24] << 8) | pBytes[25];
+	if (iUdpLength < 12 || (size_t)20 + iUdpLength > sFrame.size())
+	{
+		return true;
+	}
+	const std::string sPayload((const char*)pBytes + 28, (size_t)iUdpLength - 8);
+	if (sPayload.compare(0, 4, "LR1 ") != 0)
+	{
+		return true;
+	}
+	const uint32_t iSource = ((uint32_t)pBytes[12] << 24) | ((uint32_t)pBytes[13] << 16) | ((uint32_t)pBytes[14] << 8) | pBytes[15];
+	if (iSource == m_iVirtualIp)
+	{
+		return true;
+	}
+	std::string sMac;
+	std::string sPlace;
+	std::string sPath;
+	size_t iBegin = 4;
+	size_t iSpace = sPayload.find(' ', iBegin);
+	if (iSpace == std::string::npos)
+	{
+		return true;
+	}
+	sMac = sPayload.substr(iBegin, iSpace - iBegin);
+	iBegin = iSpace + 1;
+	iSpace = sPayload.find(' ', iBegin);
+	if (iSpace == std::string::npos)
+	{
+		return true;
+	}
+	sPlace = sPayload.substr(iBegin, iSpace - iBegin);
+	sPath = sPayload.substr(iSpace + 1);
+	if (!sPath.empty() && sPath.back() == '\n')
+	{
+		sPath.pop_back();
+	}
+	RoomClientBeacon stBeacon;
+	stBeacon.iVirtualIp = iSource;
+	stBeacon.sMac = sMac;
+	stBeacon.sPlace = sPlace;
+	stBeacon.sPath = sPath;
+	stBeacon.sVia = sVia;
+	stBeacon.iSeen = ::OI::Timer::GetTime();
+	RememberBeacon(stBeacon);
+	return true;
+}
+
+void RoomMgr::Announce()
+{
+	uint32_t iVirtualIp = 0;
+	std::string sMac;
+	std::string sPlace = "0.0.0.0:0";
+	std::string sPath = "relay";
+	bool bSend = false;
+	{
+		::OI::Thread::MutexGuard stLock(m_stStateLock);
+		if (!m_bJoined || m_iVirtualIp == 0)
+		{
+			return;
+		}
+		iVirtualIp = m_iVirtualIp;
+		sMac = m_stMac.Colon();
+		sPath = m_bSawPunch ? "direct" : "relay";
+		bool bHasOther = false;
+		bool bAllDirect = true;
+		for (const ::OI::RpcData::RoomPeer& stPeer : m_vPeers)
+		{
+			if (stPeer.sMac == m_stMac.Bytes() && stPeer.iVirtualIp == m_iVirtualIp)
+			{
+				sPlace = ::Lan::Ipv4::Text(stPeer.iSourceIp) + ":" + std::to_string(stPeer.iSourcePort);
+				continue;
+			}
+			bHasOther = true;
+			if (stPeer.iDirect == 0 || m_bDropDirect || !m_bSawPunch || stPeer.iSourcePort == 0)
+			{
+				bAllDirect = false;
+			}
+		}
+		RoomClientBeacon stSelf;
+		stSelf.iVirtualIp = iVirtualIp;
+		stSelf.sMac = sMac;
+		stSelf.sPlace = sPlace;
+		stSelf.sPath = sPath;
+		stSelf.sVia = "local";
+		stSelf.iSeen = ::OI::Timer::GetTime();
+		RememberBeacon(stSelf);
+		if (bHasOther)
+		{
+			const int64_t iNowMs = ::OI::Timer::SteadyMilliseconds();
+			bSend = m_bTcpRelay || bAllDirect || (m_iPeerSinceMs != 0 && iNowMs - m_iPeerSinceMs >= 2000);
+		}
+	}
+	if (!bSend)
+	{
+		return;
+	}
+	const std::string sPayload = "LR1 " + sMac + " " + sPlace + " " + sPath;
+	std::vector<uint8_t> vFrame(28 + sPayload.size(), 0);
+	const uint16_t iLength = (uint16_t)vFrame.size();
+	vFrame[0] = 0x45;
+	vFrame[2] = (uint8_t)(iLength >> 8);
+	vFrame[3] = (uint8_t)iLength;
+	vFrame[8] = 64;
+	vFrame[9] = 17;
+	vFrame[12] = (uint8_t)(iVirtualIp >> 24);
+	vFrame[13] = (uint8_t)(iVirtualIp >> 16);
+	vFrame[14] = (uint8_t)(iVirtualIp >> 8);
+	vFrame[15] = (uint8_t)iVirtualIp;
+	vFrame[16] = 255;
+	vFrame[17] = 255;
+	vFrame[18] = 255;
+	vFrame[19] = 255;
+	const uint16_t iSum = HeaderSum(vFrame.data(), 20);
+	vFrame[10] = (uint8_t)(iSum >> 8);
+	vFrame[11] = (uint8_t)iSum;
+	vFrame[20] = (uint8_t)(4788 >> 8);
+	vFrame[21] = (uint8_t)4788;
+	vFrame[22] = vFrame[20];
+	vFrame[23] = vFrame[21];
+	const uint16_t iUdpLength = (uint16_t)(8 + sPayload.size());
+	vFrame[24] = (uint8_t)(iUdpLength >> 8);
+	vFrame[25] = (uint8_t)iUdpLength;
+	memcpy(vFrame.data() + 28, sPayload.data(), sPayload.size());
+	SendFrame(vFrame);
+}
+
+void RoomMgr::CopyBeacons(std::vector<RoomClientBeacon>& vBeacons)
+{
+	::OI::Thread::MutexGuard stLock(m_stStateLock);
+	const time_t iNow = ::OI::Timer::GetTime();
+	vBeacons.clear();
+	for (const RoomClientBeacon& stBeacon : m_vBeacons)
+	{
+		if (iNow >= stBeacon.iSeen && iNow - stBeacon.iSeen <= 5)
+		{
+			vBeacons.push_back(stBeacon);
+		}
+	}
+}
+
+void RoomMgr::TakeFrame(const std::string& sFrame, const char* sVia)
 {
 	if (sFrame.empty() || sFrame.size() > ::Lan::kFrameMax)
+	{
+		return;
+	}
+	if (NoteBeacon(sFrame, sVia))
 	{
 		return;
 	}
@@ -64,6 +287,11 @@ void RoomMgr::TakeFrame(const std::string& sFrame)
 	{
 		return;
 	}
+	static const size_t kInboundMax = 1024;
+	if (m_vInbound.size() >= kInboundMax)
+	{
+		m_vInbound.pop_front();
+	}
 	m_vInbound.push_back(std::move(vFrame));
 }
 
@@ -75,6 +303,10 @@ int32_t RoomMgr::Punched(const ::OI::RpcData::PunchReq& stPunch, uint32_t iSourc
 		return OI_ERR_INVALID_ARGUMENT;
 	}
 	::OI::Thread::MutexGuard stLock(m_stStateLock);
+	if (!KnownPeer(iSourceIp, iSourcePort))
+	{
+		return OI_ERR_NOT_FOUND;
+	}
 	if (!m_bDropDirect)
 	{
 		m_bSawPunch = true;
@@ -89,13 +321,16 @@ int32_t RoomMgr::Received(const ::OI::RpcData::FrameReq& stFrame, uint32_t iSour
 	std::string sRoom;
 	{
 		::OI::Thread::MutexGuard stLock(m_stStateLock);
-		if (!FromServer(iSourceIp, iSourcePort) && m_bDropDirect)
+		if (!FromServer(iSourceIp, iSourcePort))
 		{
-			return OI_OK;
+			if (m_bDropDirect || !KnownPeer(iSourceIp, iSourcePort))
+			{
+				return OI_OK;
+			}
 		}
 		sRoom = m_sRoom;
 		iBegin = ::OI::Timer::SteadyMilliseconds();
-		TakeFrame(stFrame.sFrame);
+		TakeFrame(stFrame.sFrame, "udp");
 		iEnd = ::OI::Timer::SteadyMilliseconds();
 	}
 	if (!stFrame.sFrame.empty() && stFrame.sFrame.size() <= ::Lan::kFrameMax)
@@ -124,7 +359,7 @@ int32_t RoomMgr::Carried(const ::OI::RpcData::CarryReq& stCarry)
 		}
 		sRoom = m_sRoom;
 		iBegin = ::OI::Timer::SteadyMilliseconds();
-		TakeFrame(stCarry.sFrame);
+		TakeFrame(stCarry.sFrame, "tcp");
 		iEnd = ::OI::Timer::SteadyMilliseconds();
 	}
 	if (!stCarry.sFrame.empty() && stCarry.sFrame.size() <= ::Lan::kFrameMax)
@@ -152,6 +387,17 @@ void RoomMgr::KeepSnapshot(uint32_t iVirtualIp, const std::vector<::OI::RpcData:
 	m_vPeers = vPeers;
 	m_bJoined = true;
 	m_bTcpRelay = stAttr.iTcpRelay != 0;
+	if (OtherPeer() != NULL)
+	{
+		if (m_iPeerSinceMs == 0)
+		{
+			m_iPeerSinceMs = ::OI::Timer::SteadyMilliseconds();
+		}
+	}
+	else
+	{
+		m_iPeerSinceMs = 0;
+	}
 }
 
 int32_t RoomMgr::JoinCode() const
@@ -169,19 +415,34 @@ void RoomMgr::ApplyCast(const ::OI::RpcData::RoomCastReq& stCast)
 	m_iRoomVersion = stCast.stAttr.iVersion;
 	m_vPeers = stCast.vPeers;
 	m_bTcpRelay = stCast.stAttr.iTcpRelay != 0;
+	if (OtherPeer() != NULL)
+	{
+		if (m_iPeerSinceMs == 0)
+		{
+			m_iPeerSinceMs = ::OI::Timer::SteadyMilliseconds();
+		}
+	}
+	else
+	{
+		m_iPeerSinceMs = 0;
+	}
 }
 
 void RoomMgr::Probe()
 {
 	::OI::RpcData::ProbeReq stProbe;
-	stProbe.sRoom = m_sRoom;
+	uint32_t iServerIp = 0;
+	uint16_t iServerPort = 0;
 	stProbe.sMac = m_stMac.Bytes();
 	{
 		::OI::Thread::MutexGuard stLock(m_stStateLock);
+		stProbe.sRoom = m_sRoom;
 		stProbe.iSawPunch = m_bSawPunch ? 1 : 0;
+		iServerIp = m_iServerIp;
+		iServerPort = m_iServerPort;
 	}
 	RoomUdp& stUdp = RoomUdp::GetInstance();
-	stUdp.Notify(stUdp.Peer(m_iServerIp, m_iServerPort), stProbe);
+	stUdp.Notify(stUdp.Peer(iServerIp, iServerPort), stProbe);
 }
 
 void RoomMgr::SendFrame(const std::vector<uint8_t>& vFrame)
@@ -276,22 +537,34 @@ void RoomMgr::SendFrame(const std::vector<uint8_t>& vFrame)
 
 void RoomMgr::Punch()
 {
-	uint32_t iPeerIp = 0;
-	uint16_t iPeerPort = 0;
+	std::vector<std::pair<uint32_t, uint16_t>> vTargets;
 	{
 		::OI::Thread::MutexGuard stLock(m_stStateLock);
-		const ::OI::RpcData::RoomPeer* pPeer = OtherPeer();
-		if (m_bTcpRelay || pPeer == NULL || m_bDropDirect || pPeer->iSourcePort == 0 || (m_bSawPunch && pPeer->iDirect != 0))
+		if (m_bTcpRelay || m_bDropDirect)
 		{
 			return;
 		}
-		iPeerIp = pPeer->iSourceIp;
-		iPeerPort = pPeer->iSourcePort;
+		const std::string sSelf = m_stMac.Bytes();
+		for (const ::OI::RpcData::RoomPeer& stPeer : m_vPeers)
+		{
+			if ((stPeer.sMac == sSelf && stPeer.iVirtualIp == m_iVirtualIp) || stPeer.iSourcePort == 0 || (m_bSawPunch && stPeer.iDirect != 0))
+			{
+				continue;
+			}
+			vTargets.emplace_back(stPeer.iSourceIp, stPeer.iSourcePort);
+		}
+	}
+	if (vTargets.empty())
+	{
+		return;
 	}
 	::OI::RpcData::PunchReq stPunch;
 	stPunch.sMac = m_stMac.Bytes();
 	RoomUdp& stUdp = RoomUdp::GetInstance();
-	stUdp.Notify(stUdp.Peer(iPeerIp, iPeerPort), stPunch);
+	for (const auto& stTarget : vTargets)
+	{
+		stUdp.Notify(stUdp.Peer(stTarget.first, stTarget.second), stPunch);
+	}
 }
 
 ::OI::Coro::Task RoomMgr::Pump()
@@ -309,6 +582,7 @@ void RoomMgr::Punch()
 		uint32_t iAttempt = 0;
 		std::string sRoom;
 		std::string sLeaveRoom;
+		std::string sToken;
 		{
 			::OI::Thread::MutexGuard stLock(m_stStateLock);
 			bJoined = m_bJoined;
@@ -319,6 +593,7 @@ void RoomMgr::Punch()
 			iAttempt = m_iAttempt;
 			sRoom = m_sRoom;
 			sLeaveRoom = m_sLeaveRoom;
+			sToken = m_sToken;
 		}
 		if (bLeaving)
 		{
@@ -345,6 +620,7 @@ void RoomMgr::Punch()
 			::OI::RpcData::JoinReq stRequest;
 			stRequest.sRoom = sRoom;
 			stRequest.sMac = sMac;
+			stRequest.sToken = sToken;
 			stRequest.stAttr.iTcpRelay = bTcpAsk ? 1 : 0;
 			::OI::RpcData::JoinRes stResponse;
 			const int32_t iRet = co_await RoomClient::GetInstance().CallAny(stRequest, stResponse, ::OI::Timer::Seconds(3));
@@ -370,6 +646,7 @@ void RoomMgr::Punch()
 			::OI::RpcData::HeartbeatReq stRequest;
 			stRequest.sRoom = sRoom;
 			stRequest.sMac = sMac;
+			stRequest.sToken = sToken;
 			stRequest.iSawPunch = bSaw ? 1 : 0;
 			::OI::RpcData::HeartbeatRes stResponse;
 			const int32_t iRet = co_await RoomClient::GetInstance().CallAny(stRequest, stResponse, ::OI::Timer::Seconds(3));
@@ -377,8 +654,25 @@ void RoomMgr::Punch()
 			{
 				KeepSnapshot(stResponse.iVirtualIp, stResponse.vPeers, stResponse.stAttr);
 			}
+			else if (iRet != OI_ERR_TIMEOUT)
+			{
+				::OI::Thread::MutexGuard stLock(m_stStateLock);
+				if (m_iAttempt == iAttempt)
+				{
+					m_bJoined = false;
+					m_bArmed = false;
+					m_iVirtualIp = 0;
+					m_vPeers.clear();
+					m_iJoinCode.store(iRet);
+				}
+			}
 		}
 		Punch();
+		if (bJoined && ::OI::Timer::GetTime() != m_iLastAnnounce)
+		{
+			m_iLastAnnounce = ::OI::Timer::GetTime();
+			Announce();
+		}
 		co_await ::OI::Coro::yield(100);
 	}
 	co_return;
@@ -469,6 +763,12 @@ bool RoomMgr::Prepare(const std::string& sRoom, const std::string& sMac, const s
 	return true;
 }
 
+void RoomMgr::SetToken(const std::string& sToken)
+{
+	::OI::Thread::MutexGuard stLock(m_stStateLock);
+	m_sToken = sToken;
+}
+
 bool RoomMgr::Retarget(const std::string& sRoom, const std::string& sHost, uint16_t iPort, bool bTcp)
 {
 	if (sRoom.empty() || iPort == 0)
@@ -493,6 +793,7 @@ bool RoomMgr::Retarget(const std::string& sRoom, const std::string& sHost, uint1
 	m_bSawPunch = false;
 	m_iRoomVersion = 0;
 	m_iVirtualIp = 0;
+	m_iPeerSinceMs = 0;
 	m_vPeers.clear();
 	m_iJoinCode.store(0);
 	return true;
@@ -514,6 +815,7 @@ void RoomMgr::RequestLeave()
 	m_bSawPunch = false;
 	m_iRoomVersion = 0;
 	m_iVirtualIp = 0;
+	m_iPeerSinceMs = 0;
 	m_vPeers.clear();
 	m_iJoinCode.store(0);
 }

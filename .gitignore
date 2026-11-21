@@ -3,3 +3,5 @@ build-clangd/
 build-clangd-win/
 build-clangd-linux/
 __pycache__/
+deploy/.env
+deploy/geoip/*.mmdb

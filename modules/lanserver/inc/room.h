@@ -41,16 +41,17 @@ class Room
 	void WritePeers(std::vector<::OI::RpcData::RoomPeer>& vPeers) const;
 	void AddSessions(const ::OI::RpcData::RoomMember& stMember, sid_t iExcept, std::vector<sid_t>& vSessions) const;
 	static const size_t kMemberMax = 10;
-	bool HasUser(uint32_t iSourceIp, const ::Lan::MacAddress& stMac) const;
 	bool Upsert(uint32_t iSourceIp, uint16_t iSourcePort, const ::Lan::MacAddress& stMac, bool bSawPunch, time_t iNow);
 	void Expire(time_t iNow, time_t iTtl);
 	bool Fill(uint32_t iSourceIp, const ::Lan::MacAddress& stMac, uint32_t& iVirtualIp, std::vector<::OI::RpcData::RoomPeer>& vPeers) const;
 
   public:
 	void Remember(const ::Lan::MacAddress& stMac, uint32_t iSourceIp, uint16_t iSourcePort);
+	bool Owned(const ::Lan::MacAddress& stMac, sid_t iSessionId, uint32_t& iSourceIp, uint16_t& iSourcePort) const;
 	bool Claim(const ::Lan::MacAddress& stMac, sid_t iSessionId, uint32_t& iSourceIp, uint16_t& iSourcePort);
 	bool Replace(const ::Lan::MacAddress& stMac, sid_t iSessionId, uint32_t& iSourceIp, uint16_t& iSourcePort);
 	void Release(sid_t iSessionId);
+	bool HasUser(uint32_t iSourceIp, const ::Lan::MacAddress& stMac) const;
 	::OI::Coro::TaskResult<int32_t> Occupy();
 	void ReleaseBusy();
 	::OI::Coro::TaskResult<int32_t> Loaded(const std::string& sRoom);
@@ -66,6 +67,7 @@ class Room
 	uint8_t TcpRelay() const;
 	const ::OI::RpcData::RoomAttr& Attr() const;
 	const std::string& Name() const;
+	std::string LiveText() const;
 	void CopyPeers(std::vector<::OI::RpcData::RoomPeer>& vPeers) const;
 	void CollectSessions(sid_t iExcept, std::vector<sid_t>& vSessions) const;
 	// 单播只取目标成员的 TCP 会话；广播和组播取除发送者外所有人的。

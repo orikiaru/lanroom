@@ -6,6 +6,7 @@ set(MODULE_SRCS
 	src/roomudp.cpp
 	src/room_mgr.cpp
 	src/room.cpp
+	src/room_auth.cpp
 	${CMAKE_SOURCE_DIR}/modules/include/lan_addr.cpp
 )
 add_executable(lanserver ${MODULE_SRCS})

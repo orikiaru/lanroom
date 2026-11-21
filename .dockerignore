@@ -1,0 +1,9 @@
+.git
+build
+desktop/node_modules
+desktop/src-tauri/target
+manage/web/node_modules
+manage/web/dist
+**/__pycache__
+**/*.db
+.clangd

@@ -39,6 +39,30 @@ void Room::Remember(const ::Lan::MacAddress& stMac, uint32_t iSourceIp, uint16_t
 	TouchAccess();
 }
 
+bool Room::Owned(const ::Lan::MacAddress& stMac, sid_t iSessionId, uint32_t& iSourceIp, uint16_t& iSourcePort) const
+{
+	if (iSessionId == 0)
+	{
+		return false;
+	}
+	auto itSeen = m_mSeen.find(stMac.Bytes());
+	if (itSeen == m_mSeen.end())
+	{
+		return false;
+	}
+	for (const SeenEndpoint& stSlot : itSeen->second)
+	{
+		if (stSlot.iSourcePort == 0 || stSlot.iOwner != iSessionId)
+		{
+			continue;
+		}
+		iSourceIp = stSlot.iSourceIp;
+		iSourcePort = stSlot.iSourcePort;
+		return true;
+	}
+	return false;
+}
+
 bool Room::Claim(const ::Lan::MacAddress& stMac, sid_t iSessionId, uint32_t& iSourceIp, uint16_t& iSourcePort)
 {
 	auto itSeen = m_mSeen.find(stMac.Bytes());
@@ -538,4 +562,32 @@ const std::string& Room::Name() const
 void Room::CopyPeers(std::vector<::OI::RpcData::RoomPeer>& vPeers) const
 {
 	WritePeers(vPeers);
+}
+
+std::string Room::LiveText() const
+{
+	std::string sText;
+	for (const ::OI::RpcData::RoomMember& stMember : m_stRecord.vMembers)
+	{
+		::Lan::MacAddress stMac;
+		if (!stMac.From(stMember.sMac))
+		{
+			continue;
+		}
+		sText += stMac.Colon();
+		sText += " ";
+		sText += ::Lan::Ipv4::Text(stMember.iVirtualIp);
+		sText += " ";
+		sText += ::Lan::Ipv4::Text(stMember.iSourceIp);
+		sText += ":";
+		sText += std::to_string(stMember.iSourcePort);
+		sText += " ";
+		sText += stMember.iDirect != 0 ? "1" : "0";
+		sText += " ";
+		sText += m_stRecord.stAttr.iTcpRelay != 0 ? "1" : "0";
+		sText += " ";
+		sText += std::to_string(m_stRecord.iRelayCount);
+		sText += "\n";
+	}
+	return sText;
 }
